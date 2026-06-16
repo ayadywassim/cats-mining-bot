@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Cats Mining</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+<div id="app">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="header-left">
+      <div class="logo">⛏️</div>
+      <div>
+        <div class="app-name">Cats Mining</div>
+        <div class="app-sub" id="app-sub">Mine with your cats</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="lang-btn" id="lang-btn" onclick="toggleLangMenu()">🇬🇧</div>
+      <div class="balance-pill">
+        <div class="bal-dot"></div>
+        <span id="balance-display">0.00 TON</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- LANG MENU -->
+  <div class="lang-menu" id="lang-menu" style="display:none">
+    <div class="lang-opt" onclick="setLang('en')">🇬🇧 English</div>
+    <div class="lang-opt" onclick="setLang('ru')">🇷🇺 Русский</div>
+    <div class="lang-opt" onclick="setLang('ar')">🇸🇦 العربية</div>
+    <div class="lang-opt" onclick="setLang('pt')">🇧🇷 Português</div>
+    <div class="lang-opt" onclick="setLang('hi')">🇮🇳 हिन्दी</div>
+    <div class="lang-opt" onclick="setLang('tr')">🇹🇷 Türkçe</div>
+  </div>
+
+  <!-- PAGES -->
+  <div class="pages">
+
+    <!-- MINERS PAGE -->
+    <div class="page active" id="page-miners">
+      <!-- Stats Bar -->
+      <div class="stats-bar">
+        <div class="stat-box">
+          <div class="stat-icon">💰</div>
+          <div>
+            <div class="stat-value" id="stat-profit">0.000</div>
+            <div class="stat-label" id="stat-profit-label">Profit / day</div>
+          </div>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat-box">
+          <div class="stat-icon">⛏️</div>
+          <div>
+            <div class="stat-value" id="stat-miners">0</div>
+            <div class="stat-label" id="stat-miners-label">Active miners</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pending Earnings -->
+      <div class="pending-card">
+        <div class="pending-left">
+          <div class="pending-label" id="pending-label">Pending</div>
+          <div class="pending-value" id="pending-value">0.0000 <span class="pending-ton">TON</span></div>
+        </div>
+        <div class="pending-right">
+          <div class="pending-status" id="pending-status">Accumulating...</div>
+          <button class="collect-btn" id="collect-btn" onclick="collectEarnings()">Collect</button>
+        </div>
+      </div>
+
+      <!-- Miners List -->
+      <div class="section-header">
+        <span id="miners-title">All miners</span>
+        <span class="section-count">9 <span id="miners-levels">levels</span></span>
+      </div>
+      <div id="miners-list"></div>
+    </div>
+
+    <!-- TASKS PAGE -->
+    <div class="page" id="page-tasks">
+      <div class="page-banner"><img src="images/bg-tasks.png" alt="" onerror="this.parentElement.style.display='none'"></div>
+      <div class="section-header">
+        <span id="tasks-title">Available tasks</span>
+      </div>
+      <div id="tasks-list"></div>
+    </div>
+
+    <!-- FRIENDS PAGE -->
+    <div class="page" id="page-friends">
+      <div class="page-banner"><img src="images/bg-friends.png" alt="" onerror="this.parentElement.style.display='none'"></div>
+      <div class="friends-header">
+        <div class="friends-icon">👥</div>
+        <div class="friends-title" id="friends-title">Invite friends</div>
+        <div class="friends-sub" id="friends-sub">Earn 10% commission on deposits</div>
+      </div>
+      <div class="ref-link-box">
+        <div class="ref-label" id="ref-label">Your invite link</div>
+        <div class="ref-link-row">
+          <input class="ref-input" id="ref-link" readonly>
+          <button class="ref-copy" onclick="copyRefLink()">📋</button>
+        </div>
+        <div class="ref-actions">
+          <button class="ref-btn share" onclick="shareRef()" id="btn-share">Share</button>
+          <button class="ref-btn send" onclick="sendRefChat()" id="btn-send">Send to chat</button>
+        </div>
+      </div>
+      <div class="ref-stats">
+        <div class="ref-stat">
+          <div class="ref-stat-value" id="ref-count">0</div>
+          <div class="ref-stat-label" id="ref-count-label">Total referrals</div>
+        </div>
+        <div class="ref-stat">
+          <div class="ref-stat-value" id="ref-commission">0.00</div>
+          <div class="ref-stat-label" id="ref-commission-label">Commission earned</div>
+        </div>
+      </div>
+      <div id="ref-list"></div>
+    </div>
+
+    <!-- PROFILE PAGE -->
+    <div class="page" id="page-profile">
+      <div class="profile-header">
+        <div class="profile-avatar" id="profile-avatar">🐱</div>
+        <div class="profile-name" id="profile-name">Player</div>
+        <div class="profile-id" id="profile-id">ID: ---</div>
+      </div>
+      <div class="profile-stats">
+        <div class="profile-stat">
+          <div class="profile-stat-label" id="ps-balance-label">Balance</div>
+          <div class="profile-stat-value gold" id="ps-balance">0.00 TON</div>
+        </div>
+        <div class="profile-stat">
+          <div class="profile-stat-label" id="ps-invested-label">Total invested</div>
+          <div class="profile-stat-value" id="ps-invested">0.00 TON</div>
+        </div>
+        <div class="profile-stat">
+          <div class="profile-stat-label" id="ps-earned-label">Total earned</div>
+          <div class="profile-stat-value green" id="ps-earned">0.00 TON</div>
+        </div>
+        <div class="profile-stat">
+          <div class="profile-stat-label" id="ps-withdrawn-label">Total withdrawn</div>
+          <div class="profile-stat-value" id="ps-withdrawn">0.00 TON</div>
+        </div>
+        <div class="profile-stat">
+          <div class="profile-stat-label" id="ps-joined-label">Joined</div>
+          <div class="profile-stat-value" id="ps-joined">---</div>
+        </div>
+      </div>
+      <button class="withdraw-btn" onclick="openWithdraw()" id="withdraw-btn">Withdraw</button>
+      <div class="lang-section">
+        <div class="lang-section-title" id="lang-title">Language</div>
+        <div class="lang-grid">
+          <div class="lang-chip" onclick="setLang('en')">🇬🇧 EN</div>
+          <div class="lang-chip" onclick="setLang('ru')">🇷🇺 RU</div>
+          <div class="lang-chip" onclick="setLang('ar')">🇸🇦 AR</div>
+          <div class="lang-chip" onclick="setLang('pt')">🇧🇷 PT</div>
+          <div class="lang-chip" onclick="setLang('hi')">🇮🇳 HI</div>
+          <div class="lang-chip" onclick="setLang('tr')">🇹🇷 TR</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- WITHDRAW MODAL -->
+  <div class="modal" id="withdraw-modal" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+    <div class="modal-content" id="withdraw-content"></div>
+  </div>
+
+  <!-- TOAST -->
+  <div class="toast" id="toast"></div>
+
+  <!-- NAV -->
+  <div class="nav">
+    <div class="nav-item active" onclick="goPage('miners',this)">
+      <div class="nav-icon">⛏️</div>
+      <div class="nav-label" id="nav-miners">Miners</div>
+    </div>
+    <div class="nav-item" onclick="goPage('tasks',this)">
+      <div class="nav-icon">📋</div>
+      <div class="nav-label" id="nav-tasks">Tasks</div>
+    </div>
+    <div class="nav-item" onclick="goPage('friends',this)">
+      <div class="nav-icon">👥</div>
+      <div class="nav-label" id="nav-friends">Friends</div>
+    </div>
+    <div class="nav-item" onclick="goPage('profile',this)">
+      <div class="nav-icon">👤</div>
+      <div class="nav-label" id="nav-profile">Profile</div>
+    </div>
+  </div>
+
+</div>
+<script src="lang.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
