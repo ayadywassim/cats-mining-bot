@@ -59,8 +59,8 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkM
 .miner-card.legendary { border-color:var(--gold-dim); }
 .miner-card.free-card { border-color:var(--green-dim); }
 .miner-top { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
-.miner-img { width:48px; height:48px; border-radius:10px; background:var(--card); display:flex; align-items:center; justify-content:center; font-size:24px; overflow:hidden; }
-.miner-img img { width:100%; height:100%; object-fit:cover; border-radius:10px; }
+.miner-img { width:64px; height:64px; border-radius:12px; background:var(--card); display:flex; align-items:center; justify-content:center; font-size:32px; overflow:hidden; flex-shrink:0; }
+.miner-img img { width:100%; height:100%; object-fit:cover; border-radius:12px; }
 .miner-info { flex:1; }
 .miner-name { font-size:14px; font-weight:600; }
 .miner-name .lv { font-size:11px; color:var(--dim); font-weight:400; margin-left:4px; }
