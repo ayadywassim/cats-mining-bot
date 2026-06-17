@@ -199,8 +199,8 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkM
 .nav-item.active .nav-label { color:var(--gold-light); font-weight:700; }
 
 /* ===== TOAST ===== */
-.toast { position:fixed; bottom:85px; left:50%; transform:translateX(-50%) translateY(100px); background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:12px 22px; font-size:14px; z-index:300; transition:transform .3s; pointer-events:none; white-space:nowrap; box-shadow:0 8px 24px rgba(0,0,0,.4); }
-.toast.show { transform:translateX(-50%) translateY(0); }
+.toast { position:fixed; bottom:85px; left:50%; transform:translateX(-50%); background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:12px 22px; font-size:14px; z-index:300; pointer-events:none; white-space:nowrap; box-shadow:0 8px 24px rgba(0,0,0,.4); opacity:0; transition:opacity .3s; }
+.toast.show { opacity:1; }
 
 /* ===== ANIMATIONS ===== */
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }

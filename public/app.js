@@ -409,22 +409,22 @@ function showManualDeposit(wallet, memo, amount) {
     <div style="text-align:center;margin-bottom:16px">
       <div style="font-size:40px">📋</div>
       <div style="font-size:18px;font-weight:700;margin-top:8px">Manual Transfer</div>
-      <div style="font-size:13px;color:var(--dim);margin-top:4px">Send exactly ${amount} TON</div>
+      <div style="font-size:13px;color:var(--dim);margin-top:4px">Send exactly <span style="color:var(--gold-light);font-weight:700">${amount} TON</span></div>
     </div>
 
     <div style="margin-bottom:14px">
       <div style="font-size:11px;color:var(--dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Wallet Address</div>
-      <div class="copy-field" onclick="copyText('${wallet}')">
-        <span style="font-size:12px;word-break:break-all;flex:1">${wallet}</span>
-        <span style="font-size:18px;flex-shrink:0">📋</span>
+      <div style="display:flex;gap:8px">
+        <div style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:11px;word-break:break-all;color:var(--text)">${wallet}</div>
+        <button onclick="copyText('${wallet}')" style="background:var(--gold);color:var(--bg);border:none;border-radius:10px;padding:12px 16px;font-size:14px;font-weight:700;cursor:pointer;flex-shrink:0">📋 Copy</button>
       </div>
     </div>
 
     <div style="margin-bottom:14px">
       <div style="font-size:11px;color:var(--dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Memo (Required!)</div>
-      <div class="copy-field memo-field" onclick="copyText('${memo}')">
-        <span style="font-size:18px;font-weight:700;color:var(--gold-light);letter-spacing:2px;flex:1;text-align:center">${memo}</span>
-        <span style="font-size:18px;flex-shrink:0">📋</span>
+      <div style="display:flex;gap:8px">
+        <div style="flex:1;background:linear-gradient(135deg,rgba(245,166,35,.08),var(--card));border:1px solid var(--gold-dim);border-radius:10px;padding:12px;font-size:18px;font-weight:700;color:var(--gold-light);text-align:center;letter-spacing:2px">${memo}</div>
+        <button onclick="copyText('${memo}')" style="background:var(--gold);color:var(--bg);border:none;border-radius:10px;padding:12px 16px;font-size:14px;font-weight:700;cursor:pointer;flex-shrink:0">📋 Copy</button>
       </div>
     </div>
 
@@ -435,8 +435,8 @@ function showManualDeposit(wallet, memo, amount) {
     <button class="modal-btn" onclick="document.getElementById('withdraw-modal').style.display='none'">
       ✅ I've sent ${amount} TON
     </button>
-    <button class="modal-btn" onclick="showBuyModal(MINERS.find(m=>m.price===${amount}),{walletAddress:'${wallet}',memo:'${memo}'})" style="background:var(--card);color:var(--text);box-shadow:none;border:1px solid var(--border);margin-top:8px">
-      ← Back to payment options
+    <button class="modal-btn" onclick="history.back()" style="background:var(--card);color:var(--text);box-shadow:none;border:1px solid var(--border);margin-top:8px">
+      ← Back
     </button>
   `;
 }
