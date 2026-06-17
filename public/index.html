@@ -14,10 +14,10 @@
   <!-- HEADER -->
   <div class="header">
     <div class="header-left">
-      <div class="logo"><img src="images/logo.png" alt="Cats Mining" onerror="this.parentElement.textContent='⛏️'"></div>
+      <img class="hdr-logo" src="images/logo.png" alt="" onerror="this.style.display='none'">
       <div>
-        <div class="app-name">Cats Mining</div>
-        <div class="app-sub" id="app-sub">Mine with your cats</div>
+        <div class="hdr-name">Cats Mining</div>
+        <div class="hdr-sub" id="app-sub">Mine with your cats</div>
       </div>
     </div>
     <div class="header-right">
@@ -25,9 +25,9 @@
       <div class="wallet-btn" id="wallet-btn" onclick="connectWallet()">
         <span id="wallet-text">Connect</span>
       </div>
-      <div class="balance-pill">
-        <div class="bal-icon"><img src="images/ton-coin.png" alt="TON" onerror="this.parentElement.innerHTML='💎'"></div>
-        <span id="balance-display">0.00 TON</span>
+      <div class="bal-pill">
+        <img class="ton-ico" src="images/ton-coin.png" alt="T" onerror="this.outerHTML='<span class=ton-dot></span>'">
+        <span id="balance-display">0.00</span>
       </div>
     </div>
   </div>
@@ -47,81 +47,70 @@
 
     <!-- MINERS PAGE -->
     <div class="page active" id="page-miners">
-      <!-- Stats Bar -->
-      <div class="stats-bar">
-        <div class="stat-box">
-          <div class="stat-icon">💰</div>
-          <div>
-            <div class="stat-value" id="stat-profit">0.000</div>
-            <div class="stat-label" id="stat-profit-label">Profit / day</div>
-          </div>
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-ico">💰</div>
+          <div class="stat-val" id="stat-profit">0.000</div>
+          <div class="stat-lbl" id="stat-profit-label">Profit / day</div>
         </div>
-        <div class="stat-divider"></div>
-        <div class="stat-box">
-          <div class="stat-icon">⛏️</div>
-          <div>
-            <div class="stat-value" id="stat-miners">0</div>
-            <div class="stat-label" id="stat-miners-label">Active miners</div>
-          </div>
+        <div class="stat-card">
+          <div class="stat-ico">⛏️</div>
+          <div class="stat-val" id="stat-miners">0</div>
+          <div class="stat-lbl" id="stat-miners-label">Active miners</div>
         </div>
       </div>
 
-      <!-- Pending Earnings -->
-      <div class="pending-card">
-        <div class="pending-left">
-          <div class="pending-label" id="pending-label">Pending</div>
-          <div class="pending-value" id="pending-value">0.0000 <span class="pending-ton">TON</span></div>
+      <div class="pending-box">
+        <div>
+          <div class="pnd-lbl" id="pending-label">Pending</div>
+          <div class="pnd-val" id="pending-value">0.0000 <span class="pnd-ton">TON</span></div>
         </div>
-        <div class="pending-right">
-          <div class="pending-status" id="pending-status">Accumulating...</div>
-          <button class="collect-btn" id="collect-btn" onclick="collectEarnings()">Collect</button>
+        <div class="pnd-right">
+          <div class="pnd-status" id="pending-status">Accumulating...</div>
+          <button class="pnd-btn" id="collect-btn" onclick="collectEarnings()">Collect</button>
         </div>
       </div>
 
-      <!-- Miners List -->
-      <div class="section-header">
+      <div class="sec-hdr">
         <span id="miners-title">All miners</span>
-        <span class="section-count">9 <span id="miners-levels">levels</span></span>
+        <span class="sec-count">9 <span id="miners-levels">levels</span></span>
       </div>
       <div id="miners-list"></div>
     </div>
 
     <!-- TASKS PAGE -->
     <div class="page" id="page-tasks">
-      <div class="page-banner"><img src="images/bg-tasks.png" alt="" onerror="this.parentElement.style.display='none'"></div>
-      <div class="section-header">
-        <span id="tasks-title">Available tasks</span>
-      </div>
+      <div class="pg-banner"><img src="images/bg-tasks.png" alt="" onerror="this.parentElement.style.display='none'"></div>
+      <div class="sec-hdr"><span id="tasks-title">Available tasks</span></div>
       <div id="tasks-list"></div>
     </div>
 
     <!-- FRIENDS PAGE -->
     <div class="page" id="page-friends">
-      <div class="page-banner"><img src="images/bg-friends.png" alt="" onerror="this.parentElement.style.display='none'"></div>
-      <div class="friends-header">
-        <div class="friends-icon">👥</div>
-        <div class="friends-title" id="friends-title">Invite friends</div>
-        <div class="friends-sub" id="friends-sub">Earn 10% commission on deposits</div>
+      <div class="pg-banner"><img src="images/bg-friends.png" alt="" onerror="this.parentElement.style.display='none'"></div>
+      <div class="fr-hdr">
+        <div class="fr-title" id="friends-title">Invite friends</div>
+        <div class="fr-sub" id="friends-sub">Earn 10% commission on deposits</div>
       </div>
-      <div class="ref-link-box">
-        <div class="ref-label" id="ref-label">Your invite link</div>
-        <div class="ref-link-row">
-          <input class="ref-input" id="ref-link" readonly>
+      <div class="ref-box">
+        <div class="ref-lbl" id="ref-label">Your invite link</div>
+        <div class="ref-row">
+          <input class="ref-inp" id="ref-link" readonly>
           <button class="ref-copy" onclick="copyRefLink()">📋</button>
         </div>
-        <div class="ref-actions">
-          <button class="ref-btn share" onclick="shareRef()" id="btn-share">Share</button>
-          <button class="ref-btn send" onclick="sendRefChat()" id="btn-send">Send to chat</button>
+        <div class="ref-btns">
+          <button class="ref-btn-share" onclick="shareRef()" id="btn-share">↗ Share</button>
+          <button class="ref-btn-send" onclick="sendRefChat()" id="btn-send">✈ Send</button>
         </div>
       </div>
       <div class="ref-stats">
-        <div class="ref-stat">
-          <div class="ref-stat-value" id="ref-count">0</div>
-          <div class="ref-stat-label" id="ref-count-label">Total referrals</div>
+        <div class="ref-stat-card">
+          <div class="ref-stat-num" id="ref-count">0</div>
+          <div class="ref-stat-lbl" id="ref-count-label">Total referrals</div>
         </div>
-        <div class="ref-stat">
-          <div class="ref-stat-value" id="ref-commission">0.00</div>
-          <div class="ref-stat-label" id="ref-commission-label">Commission earned</div>
+        <div class="ref-stat-card">
+          <div class="ref-stat-num" id="ref-commission">0.00</div>
+          <div class="ref-stat-lbl" id="ref-commission-label">Commission</div>
         </div>
       </div>
       <div id="ref-list"></div>
@@ -129,51 +118,36 @@
 
     <!-- PROFILE PAGE -->
     <div class="page" id="page-profile">
-      <div class="profile-header">
-        <div class="profile-avatar" id="profile-avatar">🐱</div>
-        <div class="profile-name" id="profile-name">Player</div>
-        <div class="profile-id" id="profile-id">ID: ---</div>
+      <div class="prof-hdr">
+        <div class="prof-av" id="profile-avatar">🐱</div>
+        <div class="prof-name" id="profile-name">Player</div>
+        <div class="prof-id" id="profile-id">ID: ---</div>
       </div>
-      <div class="profile-stats">
-        <div class="profile-stat">
-          <div class="profile-stat-label" id="ps-balance-label">Balance</div>
-          <div class="profile-stat-value gold" id="ps-balance">0.00 TON</div>
-        </div>
-        <div class="profile-stat">
-          <div class="profile-stat-label" id="ps-invested-label">Total invested</div>
-          <div class="profile-stat-value" id="ps-invested">0.00 TON</div>
-        </div>
-        <div class="profile-stat">
-          <div class="profile-stat-label" id="ps-earned-label">Total earned</div>
-          <div class="profile-stat-value green" id="ps-earned">0.00 TON</div>
-        </div>
-        <div class="profile-stat">
-          <div class="profile-stat-label" id="ps-withdrawn-label">Total withdrawn</div>
-          <div class="profile-stat-value" id="ps-withdrawn">0.00 TON</div>
-        </div>
-        <div class="profile-stat">
-          <div class="profile-stat-label" id="ps-joined-label">Joined</div>
-          <div class="profile-stat-value" id="ps-joined">---</div>
-        </div>
+      <div class="prof-stats">
+        <div class="prof-row"><span class="prof-lbl" id="ps-balance-label">Balance</span><span class="prof-val gold" id="ps-balance">0.00 TON</span></div>
+        <div class="prof-row"><span class="prof-lbl" id="ps-invested-label">Invested</span><span class="prof-val" id="ps-invested">0.00 TON</span></div>
+        <div class="prof-row"><span class="prof-lbl" id="ps-earned-label">Earned</span><span class="prof-val green" id="ps-earned">0.00 TON</span></div>
+        <div class="prof-row"><span class="prof-lbl" id="ps-withdrawn-label">Withdrawn</span><span class="prof-val" id="ps-withdrawn">0.00 TON</span></div>
+        <div class="prof-row"><span class="prof-lbl" id="ps-joined-label">Joined</span><span class="prof-val" id="ps-joined">---</span></div>
       </div>
-      <button class="withdraw-btn" onclick="openWithdraw()" id="withdraw-btn">Withdraw</button>
-      <div class="lang-section">
-        <div class="lang-section-title" id="lang-title">Language</div>
-        <div class="lang-grid">
-          <div class="lang-chip" onclick="setLang('en')">🇬🇧 EN</div>
-          <div class="lang-chip" onclick="setLang('ru')">🇷🇺 RU</div>
-          <div class="lang-chip" onclick="setLang('ar')">🇸🇦 AR</div>
-          <div class="lang-chip" onclick="setLang('pt')">🇧🇷 PT</div>
-          <div class="lang-chip" onclick="setLang('hi')">🇮🇳 HI</div>
-          <div class="lang-chip" onclick="setLang('tr')">🇹🇷 TR</div>
+      <button class="wd-btn" onclick="openWithdraw()" id="withdraw-btn">Withdraw</button>
+      <div class="lang-sec">
+        <div class="lang-sec-title" id="lang-title">Language</div>
+        <div class="lang-chips">
+          <div class="lang-c" onclick="setLang('en')">🇬🇧</div>
+          <div class="lang-c" onclick="setLang('ru')">🇷🇺</div>
+          <div class="lang-c" onclick="setLang('ar')">🇸🇦</div>
+          <div class="lang-c" onclick="setLang('pt')">🇧🇷</div>
+          <div class="lang-c" onclick="setLang('hi')">🇮🇳</div>
+          <div class="lang-c" onclick="setLang('tr')">🇹🇷</div>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- WITHDRAW MODAL -->
+  <!-- MODAL -->
   <div class="modal" id="withdraw-modal" style="display:none" onclick="if(event.target===this)this.style.display='none'">
-    <div class="modal-content" id="withdraw-content"></div>
+    <div class="modal-box" id="withdraw-content"></div>
   </div>
 
   <!-- TOAST -->
@@ -181,21 +155,21 @@
 
   <!-- NAV -->
   <div class="nav">
-    <div class="nav-item active" onclick="goPage('miners',this)">
-      <div class="nav-icon">⛏️</div>
-      <div class="nav-label" id="nav-miners">Miners</div>
+    <div class="nav-i active" onclick="goPage('miners',this)">
+      <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 6l-6 6 6 6"/><path d="M4 12h16" stroke-linecap="round"/><path d="M20 4v16"/></svg>
+      <div class="nav-t" id="nav-miners">Miners</div>
     </div>
-    <div class="nav-item" onclick="goPage('tasks',this)">
-      <div class="nav-icon">📋</div>
-      <div class="nav-label" id="nav-tasks">Tasks</div>
+    <div class="nav-i" onclick="goPage('tasks',this)">
+      <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div class="nav-t" id="nav-tasks">Tasks</div>
     </div>
-    <div class="nav-item" onclick="goPage('friends',this)">
-      <div class="nav-icon">👥</div>
-      <div class="nav-label" id="nav-friends">Friends</div>
+    <div class="nav-i" onclick="goPage('friends',this)">
+      <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="7" r="3"/><circle cx="17" cy="7" r="3"/><path d="M3 21v-2a4 4 0 014-4h4a4 4 0 014 4v2"/><path d="M17 14a4 4 0 014 4v3"/></svg>
+      <div class="nav-t" id="nav-friends">Friends</div>
     </div>
-    <div class="nav-item" onclick="goPage('profile',this)">
-      <div class="nav-icon">👤</div>
-      <div class="nav-label" id="nav-profile">Profile</div>
+    <div class="nav-i" onclick="goPage('profile',this)">
+      <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0112 0v1"/></svg>
+      <div class="nav-t" id="nav-profile">Profile</div>
     </div>
   </div>
 
