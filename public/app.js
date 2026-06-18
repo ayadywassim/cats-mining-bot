@@ -297,21 +297,14 @@ async function connectAndPay(amount, memo) {
 async function payWithWallet(amount, memo) {
   if (!tonConnectUI || !tonConnectUI.connected) { toast('⚠️ Connect wallet first'); return; }
   try {
-    // Encode memo as TON comment (0x00000000 + UTF-8 text)
-    const te = new TextEncoder();
-    const bytes = te.encode(memo);
-    const combined = new Uint8Array(4 + bytes.length);
-    combined.set(bytes, 4);
-    let bin = '';
-    for (let i = 0; i < combined.length; i++) bin += String.fromCharCode(combined[i]);
-    const payload = btoa(bin);
-
+    // Add tiny unique decimal for transaction identification
+    const uniqueAmount = amount + (parseInt(memo.replace('CM','')) % 1000) / 1000000;
+    
     await tonConnectUI.sendTransaction({
       validUntil: Math.floor(Date.now()/1000)+600,
       messages: [{
         address: BOT_WALLET,
-        amount: (amount * 1e9).toString(),
-        payload: payload
+        amount: Math.round(uniqueAmount * 1e9).toString()
       }]
     });
     toast('✅ Payment sent! Verifying...');
@@ -319,7 +312,7 @@ async function payWithWallet(amount, memo) {
     setTimeout(()=>refreshUser(),10000);
   } catch(e) {
     if (e.message && (e.message.includes('cancel')||e.message.includes('reject'))) toast('❌ Cancelled');
-    else toast('⚠️ '+( e.message||'Payment failed'));
+    else toast('⚠️ '+(e.message||'Payment failed'));
   }
 }
 
