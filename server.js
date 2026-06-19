@@ -82,12 +82,15 @@ const ActiveMiner = mongoose.model('CatsMiningMiner', activeMinerSchema);
 
 const depositSchema = new mongoose.Schema({
   telegramId: String,
-  amount: Number,
+  amount: Number,                                                    // Base price (e.g. 0.5)
+  uniqueAmount: Number,                                              // Exact amount with unique decimal (e.g. 0.500009)
   txHash: { type: String, unique: true, sparse: true },
   minerId: String,
   memo: String,
   status: { type: String, default: 'pending', enum: ['pending', 'verified', 'failed'] },
-  createdAt: { type: Date, default: Date.now }
+  matchMethod: String,                                               // MEMO | UNIQUE_AMOUNT | EXACT_AMOUNT | DEPOSIT_ID | BALANCE
+  verifiedAt: Date,
+  createdAt: { type: Date, default: Date.now, expires: 86400 * 7 }   // auto-delete pending after 7 days
 });
 const Deposit = mongoose.model('CatsMiningDeposit', depositSchema);
 
@@ -281,25 +284,35 @@ app.post('/api/miners/buy', async (req, res) => {
       return res.json({ success: true, miner, type: 'free' });
     }
 
-    // Paid miner — create pending deposit
-    const memo = 'CM' + telegramId.toString();
+    // Paid miner — create pending deposit with unique tracking amount
+    const tgId = telegramId.toString();
+    const lastDigits = parseInt(tgId.slice(-4)) || 0;
+    const uniqueAmount = +(minerConfig.price + (lastDigits / 1000000)).toFixed(6);
+    const depositId = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const memo = `CM${tgId}_${depositId}`;
+
     const deposit = new Deposit({
-      telegramId: telegramId.toString(),
+      telegramId: tgId,
       amount: minerConfig.price,
+      uniqueAmount: uniqueAmount,
       minerId: minerConfig.id,
-      memo
+      memo: memo
     });
     await deposit.save();
+
+    console.log(`[PAYMENT] Created deposit: user=${tgId} miner=${minerConfig.id} amount=${minerConfig.price} unique=${uniqueAmount} memo=${memo}`);
 
     res.json({
       success: true,
       type: 'deposit_required',
       walletAddress: process.env.BOT_WALLET,
       amount: minerConfig.price,
-      memo,
-      depositId: deposit._id
+      uniqueAmount: uniqueAmount,
+      memo: memo,
+      depositId: deposit._id.toString()
     });
   } catch (error) {
+    console.error('[PAYMENT] Error:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -531,6 +544,7 @@ app.post('/api/withdrawals/request', async (req, res) => {
   }
 });
 
+
 // ============ API: TASKS ============
 app.get('/api/tasks', async (req, res) => {
   try {
@@ -642,97 +656,160 @@ async function verifyDeposits() {
     const pending = await Deposit.find({ status: 'pending' });
     if (!pending.length) return;
 
-    console.log(`[VERIFY] Checking ${pending.length} pending deposits...`);
+    console.log(`\n[VERIFY] ════════ Starting verification ════════`);
+    console.log(`[VERIFY] Pending deposits: ${pending.length}`);
 
     const apiKey = process.env.TONCENTER_KEY;
     const wallet = process.env.BOT_WALLET;
     if (!apiKey) { console.log('[VERIFY] ❌ TONCENTER_KEY missing'); return; }
     if (!wallet) { console.log('[VERIFY] ❌ BOT_WALLET missing'); return; }
 
-    const response = await fetch(`https://toncenter.com/api/v2/getTransactions?address=${wallet}&limit=50&api_key=${apiKey}`);
-    const data = await response.json();
-    if (!data.ok || !data.result) {
-      console.log('[VERIFY] ❌ Toncenter error:', data.error || 'no result');
+    console.log(`[TON] Wallet: ${wallet.slice(0,8)}...${wallet.slice(-6)}`);
+
+    // Fetch transactions with retries
+    let txData = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const response = await fetch(`https://toncenter.com/api/v2/getTransactions?address=${wallet}&limit=50&api_key=${apiKey}`);
+        const data = await response.json();
+        if (data.ok && data.result) { txData = data.result; break; }
+        console.log(`[TON] ⚠️ Attempt ${attempt}: ${data.error || 'no result'}`);
+        await new Promise(r => setTimeout(r, 2000));
+      } catch(e) {
+        console.log(`[TON] ❌ Attempt ${attempt} failed: ${e.message}`);
+      }
+    }
+
+    if (!txData) {
+      console.log('[VERIFY] ❌ Could not fetch transactions after 3 attempts');
       return;
     }
 
-    console.log(`[TON] Got ${data.result.length} transactions`);
+    console.log(`[TON] Got ${txData.length} transactions`);
 
-    for (const tx of data.result) {
+    for (const tx of txData) {
       const inMsg = tx.in_msg;
       if (!inMsg || !inMsg.value) continue;
-      const amountTON = parseInt(inMsg.value) / 1e9;
-      if (amountTON < 0.1) continue; // skip tiny txs
+      if (parseInt(inMsg.value) === 0) continue;  // skip outgoing
 
-      const memo = (inMsg.message || '').trim();
+      const amountNano = parseInt(inMsg.value);
+      const amountTON = amountNano / 1e9;
+      if (amountTON < 0.05) continue;  // skip dust
+
       const txHash = tx.transaction_id?.hash || '';
-      const fromAddr = inMsg.source || '';
+      const fromAddr = inMsg.source || 'unknown';
 
-      // Skip if this tx already processed
+      // Parse memo from in_msg.message OR msg_data.text
+      let memo = '';
+      if (inMsg.message) {
+        memo = inMsg.message.trim();
+      } else if (inMsg.msg_data && inMsg.msg_data.text) {
+        // Decode base64 if needed
+        try {
+          memo = Buffer.from(inMsg.msg_data.text, 'base64').toString('utf-8');
+          // Remove 4-byte op code prefix if present (0x00000000 for plain text comment)
+          if (memo.charCodeAt(0) === 0) memo = memo.substring(4);
+          memo = memo.replace(/\0/g, '').trim();
+        } catch(e) {}
+      }
+
+      console.log(`\n[TX] ────────────────────────────`);
+      console.log(`[TX] Amount: ${amountTON} TON (${amountNano} nano)`);
+      console.log(`[TX] Memo: "${memo}"`);
+      console.log(`[TX] From: ${fromAddr.slice(0,8)}...${fromAddr.slice(-6)}`);
+      console.log(`[TX] Hash: ${txHash.slice(0,12)}...`);
+
+      // Skip if already processed
       const txProcessed = await Deposit.findOne({ txHash, status: 'verified' });
-      if (txProcessed) continue;
-
-      console.log(`[TON] TX: ${amountTON} TON | memo="${memo}" | hash=${txHash.slice(0,8)}`);
+      if (txProcessed) {
+        console.log(`[TX] ⏭️ Already processed`);
+        continue;
+      }
 
       let matchedDep = null;
       let matchMethod = '';
 
-      // METHOD 1: Match by memo
-      if (memo) {
+      // ╔══════════════════════════════════════════════╗
+      // ║  MATCHING PRIORITY                            ║
+      // ║  1. MEMO match (most reliable)                ║
+      // ║  2. UNIQUE_AMOUNT match (TON Connect)         ║
+      // ║  3. EXACT_AMOUNT match (fallback)             ║
+      // ╚══════════════════════════════════════════════╝
+
+      // ─── PRIORITY 1: MEMO MATCH ───
+      if (memo && memo.length > 2) {
         for (const dep of pending) {
-          if (memo.includes(dep.memo) && amountTON >= dep.amount * 0.95) {
-            matchedDep = dep;
-            matchMethod = 'MEMO';
-            break;
+          if (!dep.memo) continue;
+          // Match if memo contains the deposit memo string
+          if (memo.includes(dep.memo) || memo.includes(dep.memo.replace('_', ''))) {
+            // Verify amount is at least 90% of expected
+            if (amountTON >= dep.amount * 0.90) {
+              matchedDep = dep;
+              matchMethod = 'MEMO';
+              console.log(`[MATCH] ✅ MEMO match: deposit ${dep._id}`);
+              break;
+            } else {
+              console.log(`[MATCH] ⚠️ MEMO matched but amount too low: ${amountTON} < ${dep.amount}`);
+            }
           }
         }
       }
 
-      // METHOD 2: Match by unique decimal amount (TON Connect)
+      // ─── PRIORITY 2: UNIQUE AMOUNT MATCH ───
       if (!matchedDep) {
         for (const dep of pending) {
-          // Calculate expected unique amount for this user
-          const lastDigits = parseInt(dep.telegramId.slice(-4)) || 0;
-          const uniqueAmount = dep.amount + (lastDigits / 1000000);
-          const diff = Math.abs(amountTON - uniqueAmount);
-          if (diff < 0.0001) { // exact match
+          if (!dep.uniqueAmount) continue;
+          const diff = Math.abs(amountTON - dep.uniqueAmount);
+          if (diff < 0.0001) {  // within 0.0001 TON
             matchedDep = dep;
             matchMethod = 'UNIQUE_AMOUNT';
+            console.log(`[MATCH] ✅ UNIQUE_AMOUNT match: ${amountTON} ≈ ${dep.uniqueAmount}`);
             break;
           }
         }
       }
 
-      // METHOD 3: Match by exact amount (fallback)
+      // ─── PRIORITY 3: EXACT AMOUNT MATCH ───
       if (!matchedDep) {
-        for (const dep of pending) {
-          const diff = Math.abs(amountTON - dep.amount);
-          if (diff < 0.01) { // within 0.01 TON
+        // Sort by createdAt (newest first) for best UX
+        const sorted = [...pending].sort((a, b) => b.createdAt - a.createdAt);
+        for (const dep of sorted) {
+          // Match if amount is between expected and expected+0.01 (allow small extra for fees)
+          if (amountTON >= dep.amount * 0.99 && amountTON <= dep.amount * 1.05) {
             matchedDep = dep;
             matchMethod = 'EXACT_AMOUNT';
+            console.log(`[MATCH] ✅ EXACT_AMOUNT match: ${amountTON} ≈ ${dep.amount}`);
             break;
           }
         }
       }
 
       if (!matchedDep) {
-        console.log(`[VERIFY] ⚠️ No match for ${amountTON} TON`);
+        console.log(`[MATCH] ❌ NO MATCH for ${amountTON} TON, memo="${memo}"`);
+        console.log(`[MATCH] Pending deposits:`);
+        for (const dep of pending) {
+          console.log(`[MATCH]   - user=${dep.telegramId} amount=${dep.amount} unique=${dep.uniqueAmount} memo=${dep.memo}`);
+        }
         continue;
       }
 
-      console.log(`[VERIFY] ✅ Matched ${matchedDep.memo} via ${matchMethod}`);
+      // ─── VERIFY THE DEPOSIT ───
+      try {
+        matchedDep.status = 'verified';
+        matchedDep.txHash = txHash;
+        matchedDep.matchMethod = matchMethod;
+        matchedDep.verifiedAt = new Date();
+        await matchedDep.save();
 
-      // Mark verified
-      matchedDep.status = 'verified';
-      matchedDep.txHash = txHash;
-      matchedDep.verifiedAt = new Date();
-      await matchedDep.save();
+        console.log(`[VERIFY] ✅ Deposit verified: user=${matchedDep.telegramId} method=${matchMethod}`);
 
-      console.log(`[DEPOSIT] Verified: user=${matchedDep.telegramId} amount=${amountTON} miner=${matchedDep.minerId}`);
+        // Activate miner
+        const minerConfig = MINERS_CONFIG.find(m => m.id === matchedDep.minerId);
+        if (!minerConfig) {
+          console.log(`[MINER] ❌ Miner config not found: ${matchedDep.minerId}`);
+          continue;
+        }
 
-      // Activate miner with 24h delay
-      const minerConfig = MINERS_CONFIG.find(m => m.id === matchedDep.minerId);
-      if (minerConfig) {
         const activateAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
         const miner = new ActiveMiner({
           telegramId: matchedDep.telegramId,
@@ -746,14 +823,16 @@ async function verifyDeposits() {
           expiresAt: new Date(activateAt.getTime() + minerConfig.days * 24 * 60 * 60 * 1000)
         });
         await miner.save();
+
         console.log(`[MINER] ✅ Activated ${minerConfig.name} for ${matchedDep.telegramId}`);
 
+        // Update user stats
         await User.findOneAndUpdate(
           { telegramId: matchedDep.telegramId },
           { $inc: { totalDeposited: amountTON, totalInvested: amountTON } }
         );
 
-        // Referral commission (10%)
+        // Referral commission
         const user = await User.findOne({ telegramId: matchedDep.telegramId });
         if (user && user.referredBy) {
           const commission = amountTON * 0.10;
@@ -767,16 +846,26 @@ async function verifyDeposits() {
         // Notify user via bot
         try {
           await bot.sendMessage(matchedDep.telegramId,
-            `✅ *Payment Verified!*\n\n⛏️ ${minerConfig.name} (Lv.${minerConfig.level})\n💰 Daily: ${minerConfig.daily} TON\n⏳ Starts earning in 24h\n📅 Contract: ${minerConfig.days} days`,
+            `✅ *Payment Verified!*\n\n⛏️ ${minerConfig.name} (Lv.${minerConfig.level})\n💰 Daily: ${minerConfig.daily} TON\n⏳ Starts earning in 24h\n📅 Contract: ${minerConfig.days} days\n💎 Total return: ${minerConfig.total} TON\n\n_Match: ${matchMethod}_`,
             { parse_mode: 'Markdown' }
           );
         } catch(e) { console.log('[BOT] Notify failed:', e.message); }
+      } catch (e) {
+        console.log(`[VERIFY] ❌ Failed to save: ${e.message}`);
+        // Reset to pending if save fails
+        if (matchedDep) {
+          matchedDep.status = 'pending';
+          await matchedDep.save().catch(()=>{});
+        }
       }
     }
+
+    console.log(`[VERIFY] ════════ Verification complete ════════\n`);
   } catch (error) {
-    console.error('[VERIFY] Error:', error.message);
+    console.error('[VERIFY] ❌ Fatal error:', error.message);
   }
 }
+
 
 // ============ EXPIRE MINERS (CRON) ============
 async function expireMiners() {

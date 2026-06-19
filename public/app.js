@@ -353,24 +353,93 @@ async function payOption1() {
   await sendWalletPayment(amount, memo);
 }
 
+// ============ TON COMMENT PAYLOAD BUILDER ============
+// Builds a valid BOC (Bag of Cells) for a text comment
+// This is the format wallets like Tonkeeper expect
+function buildTonCommentBOC(text) {
+  try {
+    const textBytes = new TextEncoder().encode(text);
+    const dataLen = 4 + textBytes.length; // 4 byte op code + text
+    if (dataLen > 123) return null;
+
+    // Build cell data: 4 zero bytes (op code) + UTF-8 text
+    const cellData = new Uint8Array(dataLen);
+    cellData.set(textBytes, 4);
+
+    // BOC header + single cell descriptor
+    // Format: magic(4) flags+offSize(1) cells(1) roots(1) absent(1) totalSize(1) rootIdx(1) refs(1) bits(1) data
+    const boc = new Uint8Array([
+      0xB5, 0xEE, 0x9C, 0x72,           // BOC magic
+      0x01,                              // has_idx=0, has_crc=0, has_cache_bits=0, flags=0, size_bytes=1
+      0x01,                              // off_bytes
+      0x01,                              // cells_num
+      0x01,                              // roots_num
+      0x00,                              // absent_num
+      dataLen + 2,                       // tot_cells_size
+      0x00,                              // root_list[0]
+      0x00,                              // refs descriptor (0 refs, not exotic)
+      dataLen * 2,                       // bits descriptor (data bits / 4)
+      ...cellData                        // cell data
+    ]);
+
+    // Base64 encode
+    let bin = '';
+    for (let i = 0; i < boc.length; i++) bin += String.fromCharCode(boc[i]);
+    return btoa(bin);
+  } catch(e) {
+    console.error('[PAYMENT] BOC build failed:', e);
+    return null;
+  }
+}
+
 async function sendWalletPayment(amount, memo) {
   try {
-    const lastDigits = parseInt(userData.telegramId.slice(-4)) || 0;
-    const uniqueAmount = amount + (lastDigits / 1000000);
+    console.log('[PAYMENT] ════════ Starting TON Connect payment ════════');
+    console.log('[PAYMENT] Amount:', amount, 'TON');
+    console.log('[PAYMENT] Memo:', memo);
+    console.log('[PAYMENT] To:', BOT_WALLET);
 
-    await tonConnectUI.sendTransaction({
-      validUntil: Math.floor(Date.now()/1000)+600,
-      messages: [{
-        address: BOT_WALLET,
-        amount: Math.round(uniqueAmount * 1e9).toString()
-      }]
-    });
+    const lastDigits = parseInt(userData.telegramId.slice(-4)) || 0;
+    const uniqueAmount = +(amount + (lastDigits / 1000000)).toFixed(6);
+    const amountNano = Math.round(uniqueAmount * 1e9).toString();
+
+    console.log('[PAYMENT] Unique amount:', uniqueAmount, 'TON');
+    console.log('[PAYMENT] Nano:', amountNano);
+
+    // Build payload with proper BOC format
+    const payload = buildTonCommentBOC(memo);
+    console.log('[PAYMENT] Payload built:', payload ? 'YES ('+payload.length+' chars)' : 'NO (fallback to amount only)');
+
+    const message = {
+      address: BOT_WALLET,
+      amount: amountNano
+    };
+
+    // Add payload only if successfully built
+    if (payload) {
+      message.payload = payload;
+    }
+
+    const tx = {
+      validUntil: Math.floor(Date.now()/1000) + 600,
+      messages: [message]
+    };
+
+    console.log('[PAYMENT] Sending transaction...');
+    const result = await tonConnectUI.sendTransaction(tx);
+    console.log('[PAYMENT] ✅ Transaction sent!');
+    console.log('[PAYMENT] BOC:', result.boc ? result.boc.slice(0,40)+'...' : 'no boc');
+
     document.getElementById('buy-modal').style.display='none';
     showSentPage(currentBuyMiner);
-    setTimeout(()=>refreshUser(),10000);
+    setTimeout(()=>refreshUser(), 10000);
   } catch(e) {
-    if (e.message && (e.message.includes('cancel')||e.message.includes('reject'))) toast('❌ Cancelled');
-    else toast('⚠️ '+(e.message||'Payment failed'));
+    console.error('[PAYMENT] ❌ Error:', e);
+    if (e.message && (e.message.includes('cancel')||e.message.includes('reject')||e.message.includes('declined'))) {
+      toast('❌ Payment cancelled');
+    } else {
+      toast('⚠️ '+(e.message||'Payment failed'));
+    }
   }
 }
 
