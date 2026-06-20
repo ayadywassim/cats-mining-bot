@@ -150,7 +150,12 @@ async function refreshUser() {
 function startPendingCounter() {
   if (pendingInterval) clearInterval(pendingInterval);
   updatePending();
-  pendingInterval = setInterval(updatePending, 3000);
+  // Slower interval (5s instead of 3s) reduces server load
+  pendingInterval = setInterval(() => {
+    // Skip updates when document is hidden (saves battery + API calls)
+    if (document.hidden) return;
+    updatePending();
+  }, 5000);
 }
 
 async function updatePending() {
@@ -159,10 +164,14 @@ async function updatePending() {
     const r = await fetch(API+'/api/miners/pending/'+userData.telegramId);
     const d = await r.json();
     if (d.success) {
-      document.getElementById('pending-value').innerHTML = d.pending.toFixed(4)+' <span class="pnd-ton">TON</span>';
-      document.getElementById('stat-profit').textContent = d.dailyProfit.toFixed(3);
-      document.getElementById('stat-miners').textContent = d.activeCount;
-      document.getElementById('hdr-miners').textContent = d.activeCount;
+      const pndEl = document.getElementById('pending-value');
+      const profEl = document.getElementById('stat-profit');
+      const minEl = document.getElementById('stat-miners');
+      const hdrMin = document.getElementById('hdr-miners');
+      if (pndEl) pndEl.innerHTML = d.pending.toFixed(4)+' <span class="pnd-ton">TON</span>';
+      if (profEl) profEl.textContent = d.dailyProfit.toFixed(3);
+      if (minEl) minEl.textContent = d.activeCount;
+      if (hdrMin) hdrMin.textContent = d.activeCount;
     }
   } catch(e) {}
 }

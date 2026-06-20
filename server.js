@@ -53,15 +53,32 @@ const userSchema = new mongoose.Schema({
   totalWithdrawn: { type: Number, default: 0 },
   totalDeposited: { type: Number, default: 0 },
   referrals: { type: [String], default: [] },
-  referredBy: String,
+  referredBy: { type: String, default: null },
+  referralLocked: { type: Boolean, default: false },  // Once set, can't change
   refCommission: { type: Number, default: 0 },
   completedTasks: { type: [String], default: [] },
   banned: { type: Boolean, default: false },
   withdrawBypass: { type: Boolean, default: false },
   lastDaily: Date,
+  ipAddress: String,                                  // For fraud detection
+  registrationFingerprint: String,                    // photoUrl + username pattern
   createdAt: { type: Date, default: Date.now }
 });
 const User = mongoose.model('CatsMiningUser', userSchema);
+
+// Referral audit log
+const referralLogSchema = new mongoose.Schema({
+  referrerId: String,
+  referredId: String,
+  status: { type: String, enum: ['pending', 'verified', 'rejected', 'paid'], default: 'pending' },
+  reason: String,
+  commission: { type: Number, default: 0 },
+  depositAmount: Number,
+  createdAt: { type: Date, default: Date.now },
+  verifiedAt: Date
+});
+referralLogSchema.index({ referrerId: 1, referredId: 1 }, { unique: true });
+const ReferralLog = mongoose.model('CatsMiningReferralLog', referralLogSchema);
 
 const activeMinerSchema = new mongoose.Schema({
   telegramId: { type: String, index: true },
@@ -187,35 +204,72 @@ app.post('/api/register', async (req, res) => {
 
     if (!user) {
       user = new User({ telegramId: tgId, firstName, username, photoUrl });
-      
-      // Validate referral
-      if (refBy && refBy !== tgId) {  // prevent self-referral
-        const referrer = await User.findOne({ telegramId: refBy.toString() });
-        if (referrer && !referrer.banned) {
-          // Check if already in referrals (prevent duplicates)
-          if (!referrer.referrals.includes(tgId)) {
-            user.referredBy = refBy.toString();
-            await User.findOneAndUpdate(
-              { telegramId: refBy.toString() }, 
-              { $addToSet: { referrals: tgId } }
-            );
-            console.log(`[REFERRAL] New: ${tgId} → invited by ${refBy}`);
+      const ipAddress = req.headers['x-forwarded-for']?.split(',')[0] || req.ip || '';
+      user.ipAddress = ipAddress;
+
+      // ─── SECURE REFERRAL VALIDATION ───
+      if (refBy && refBy.toString() !== tgId) {
+        const refByStr = refBy.toString();
+
+        // Check 1: Referrer must exist
+        const referrer = await User.findOne({ telegramId: refByStr });
+        if (!referrer) {
+          console.log(`[REFERRAL] ❌ REJECT: referrer ${refByStr} not found`);
+        } else if (referrer.banned) {
+          console.log(`[REFERRAL] ❌ REJECT: referrer ${refByStr} is banned`);
+        } else if (referrer.referrals.includes(tgId)) {
+          console.log(`[REFERRAL] ❌ REJECT: duplicate referral`);
+        } else {
+          // Check 2: IP/fingerprint fraud (same IP = suspicious)
+          let suspicious = false;
+          if (ipAddress && referrer.ipAddress === ipAddress) {
+            suspicious = true;
+            console.log(`[REFERRAL] ⚠️ Same IP detected: ${ipAddress}`);
           }
+
+          // Set referral (locked permanently)
+          user.referredBy = refByStr;
+          user.referralLocked = true;
+
+          await User.findOneAndUpdate(
+            { telegramId: refByStr },
+            { $addToSet: { referrals: tgId } }
+          );
+
+          // Create audit log
+          await ReferralLog.create({
+            referrerId: refByStr,
+            referredId: tgId,
+            status: suspicious ? 'pending' : 'pending',
+            reason: suspicious ? 'same_ip_flagged' : 'awaiting_deposit'
+          }).catch(e => console.log('[REFERRAL] Log exists or error:', e.message));
+
+          console.log(`[REFERRAL] ✅ Linked: ${tgId} → invited by ${refByStr}${suspicious?' [FLAGGED]':''}`);
         }
       }
       await user.save();
       console.log(`[USER] New: ${tgId} (${firstName})`);
     } else {
-      // Auto-fix referral if missing
-      if (refBy && refBy !== tgId && !user.referredBy) {
-        const referrer = await User.findOne({ telegramId: refBy.toString() });
+      // ─── EXISTING USER ───
+      // Referral is locked once set — no auto-fix for security
+      // Only allow if referredBy is null AND referralLocked is false (first time grab)
+      if (refBy && refBy.toString() !== tgId && !user.referredBy && !user.referralLocked) {
+        const refByStr = refBy.toString();
+        const referrer = await User.findOne({ telegramId: refByStr });
         if (referrer && !referrer.banned && !referrer.referrals.includes(tgId)) {
-          user.referredBy = refBy.toString();
+          user.referredBy = refByStr;
+          user.referralLocked = true;
           await User.findOneAndUpdate(
-            { telegramId: refBy.toString() }, 
+            { telegramId: refByStr },
             { $addToSet: { referrals: tgId } }
           );
-          console.log(`[REFERRAL] Late credit: ${tgId} → ${refBy}`);
+          await ReferralLog.create({
+            referrerId: refByStr,
+            referredId: tgId,
+            status: 'pending',
+            reason: 'late_credit'
+          }).catch(()=>{});
+          console.log(`[REFERRAL] ✅ Late credit: ${tgId} → ${refByStr}`);
         }
       }
       if (firstName) user.firstName = firstName;
@@ -364,14 +418,28 @@ app.post('/api/miners/buy-balance', async (req, res) => {
     });
     await deposit.save();
 
-    // Referral commission
+    // Referral commission — only if not paid yet (prevent duplicate)
     if (updated.referredBy) {
-      const commission = minerConfig.price * 0.10;
-      await User.findOneAndUpdate(
-        { telegramId: updated.referredBy },
-        { $inc: { balance: commission, refCommission: commission, totalEarned: commission } }
-      );
-      console.log(`[REFERRAL] +${commission} TON to ${updated.referredBy}`);
+      const existingLog = await ReferralLog.findOne({
+        referrerId: updated.referredBy,
+        referredId: tgId,
+        status: 'paid'
+      });
+      if (!existingLog) {
+        const commission = minerConfig.price * 0.10;
+        await User.findOneAndUpdate(
+          { telegramId: updated.referredBy },
+          { $inc: { balance: commission, refCommission: commission, totalEarned: commission } }
+        );
+        await ReferralLog.findOneAndUpdate(
+          { referrerId: updated.referredBy, referredId: tgId },
+          { status: 'paid', commission, depositAmount: minerConfig.price, verifiedAt: new Date() },
+          { upsert: true }
+        );
+        console.log(`[REFERRAL] +${commission} TON to ${updated.referredBy} (balance buy)`);
+      } else {
+        console.log(`[REFERRAL] ⏭️ Already paid for ${tgId} → ${updated.referredBy}`);
+      }
     }
 
     res.json({ success: true, type: 'balance', miner });
@@ -567,7 +635,45 @@ app.post('/api/tasks/complete', async (req, res) => {
     const task = await Task.findOne({ taskId, enabled: true });
     if (!task) return res.status(404).json({ error: 'TASK_NOT_FOUND' });
 
-    // Verify channel membership if task has a channel link
+    // ─── SERVER-SIDE TASK VALIDATION ───
+
+    // Task: Buy First Miner — verify user owns at least 1 active miner
+    if (taskId === 't_miner' || taskId.includes('miner') || (task.requireMiner)) {
+      const hasMiner = await ActiveMiner.findOne({ telegramId: tgId });
+      if (!hasMiner) {
+        console.log(`[TASK] ❌ ${tgId} no miner for ${taskId}`);
+        return res.status(400).json({ error: 'NO_MINER', message: 'You must buy a miner first' });
+      }
+    }
+
+    // Task: Deposit — verify at least one verified deposit
+    if (taskId.includes('deposit') || (task.requireDeposit)) {
+      const hasDeposit = await Deposit.findOne({ telegramId: tgId, status: 'verified' });
+      if (!hasDeposit) {
+        return res.status(400).json({ error: 'NO_DEPOSIT', message: 'You must make a deposit first' });
+      }
+    }
+
+    // Task: Referral — verify actual paid referrals
+    if (taskId.includes('invite') || taskId.includes('ref') || (task.requireReferrals)) {
+      const required = task.requireReferrals || 1;
+      let paidRefs = 0;
+      for (const refId of user.referrals) {
+        const dep = await Deposit.findOne({ telegramId: refId, status: 'verified' });
+        if (dep) { paidRefs++; if (paidRefs >= required) break; }
+      }
+      if (paidRefs < required) {
+        return res.status(400).json({ error: 'NOT_ENOUGH_REFS', current: paidRefs, required, message: `Need ${required} paid referrals` });
+      }
+    }
+
+    // Task: Wallet — verify wallet connected (we trust this via frontend signal but flag missing)
+    if (taskId.includes('wallet')) {
+      // No backend check available — must rely on frontend confirmation
+      // Optionally: require user to send wallet address in body
+    }
+
+    // Task: Channel join — verify via Telegram API
     if (task.link && task.link.includes('t.me/')) {
       const match = task.link.match(/t\.me\/([+a-zA-Z0-9_]+)/);
       if (match) {
@@ -576,25 +682,30 @@ app.post('/api/tasks/complete', async (req, res) => {
           const member = await bot.getChatMember(channel, tgId);
           const isMember = ['member', 'administrator', 'creator'].includes(member.status);
           if (!isMember) {
-            console.log(`[TASK] ${tgId} not member of ${channel}, status=${member.status}`);
+            console.log(`[TASK] ❌ ${tgId} not member of ${channel}, status=${member.status}`);
             return res.status(400).json({ error: 'NOT_MEMBER', message: 'Please join the channel first' });
           }
-          console.log(`[TASK] ${tgId} verified as member of ${channel}`);
+          console.log(`[TASK] ✅ ${tgId} verified as member of ${channel}`);
         } catch(e) {
-          // If bot is not admin in channel, trust the user (fallback)
-          console.log(`[TASK] Cannot verify ${channel}: ${e.message} - falling back to trust`);
+          console.log(`[TASK] ⚠️ Cannot verify ${channel}: ${e.message}`);
+          // If bot is not admin in channel, fail closed (require user to ask admin)
+          return res.status(400).json({ error: 'VERIFY_FAILED', message: 'Cannot verify membership — bot may not be admin in channel' });
         }
       }
     }
 
-    user.completedTasks.push(taskId);
-    user.balance += task.reward;
-    user.totalEarned += task.reward;
-    await user.save();
+    // ATOMIC reward delivery
+    const updated = await User.findOneAndUpdate(
+      { telegramId: tgId, completedTasks: { $ne: taskId } },
+      { $push: { completedTasks: taskId }, $inc: { balance: task.reward, totalEarned: task.reward } },
+      { new: true }
+    );
+    if (!updated) return res.status(400).json({ error: 'ALREADY_COMPLETED' });
 
-    console.log(`[TASK] ${tgId} completed ${taskId} +${task.reward} TON`);
-    res.json({ success: true, reward: task.reward, newBalance: user.balance });
+    console.log(`[TASK] ✅ ${tgId} completed ${taskId} +${task.reward} TON`);
+    res.json({ success: true, reward: task.reward, newBalance: updated.balance });
   } catch (error) {
+    console.error('[TASK] Error:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -832,15 +943,29 @@ async function verifyDeposits() {
           { $inc: { totalDeposited: amountTON, totalInvested: amountTON } }
         );
 
-        // Referral commission
+        // Referral commission — prevent duplicate via audit log
         const user = await User.findOne({ telegramId: matchedDep.telegramId });
         if (user && user.referredBy) {
-          const commission = amountTON * 0.10;
-          await User.findOneAndUpdate(
-            { telegramId: user.referredBy },
-            { $inc: { balance: commission, refCommission: commission, totalEarned: commission } }
-          );
-          console.log(`[REFERRAL] +${commission.toFixed(4)} TON to ${user.referredBy}`);
+          const existingLog = await ReferralLog.findOne({
+            referrerId: user.referredBy,
+            referredId: matchedDep.telegramId,
+            status: 'paid'
+          });
+          if (!existingLog) {
+            const commission = amountTON * 0.10;
+            await User.findOneAndUpdate(
+              { telegramId: user.referredBy },
+              { $inc: { balance: commission, refCommission: commission, totalEarned: commission } }
+            );
+            await ReferralLog.findOneAndUpdate(
+              { referrerId: user.referredBy, referredId: matchedDep.telegramId },
+              { status: 'paid', commission, depositAmount: amountTON, verifiedAt: new Date() },
+              { upsert: true }
+            );
+            console.log(`[REFERRAL] +${commission.toFixed(4)} TON to ${user.referredBy} (verified deposit)`);
+          } else {
+            console.log(`[REFERRAL] ⏭️ Already paid for ${matchedDep.telegramId}`);
+          }
         }
 
         // Notify user via bot
