@@ -8,6 +8,48 @@ let tonConnectUI = null;
 let currentBuyMiner = null;
 let currentBuyMemo = null;
 
+// ============ PROFESSIONAL SVG ICONS LIBRARY ============
+// All icons use same stroke-width:2, viewBox:0 0 24 24, currentColor
+const ICON = {
+  // Money & Crypto
+  coin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 8h4.5a2.5 2.5 0 010 5H10a2.5 2.5 0 000 5h5"/><path d="M12 5v3M12 16v3"/></svg>',
+  diamond: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12l4 6-10 13L2 9z"/><path d="M11 3L8 9l4 13 4-13-3-6"/><path d="M2 9h20"/></svg>',
+  wallet: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M16 14a2 2 0 010-4h6v4z"/></svg>',
+  // Mining
+  pickaxe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4l6 6-9.5 9.5a2.5 2.5 0 01-3.5-3.5L16 7"/><circle cx="18" cy="6" r="1.5" fill="currentColor"/></svg>',
+  // People
+  user: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 016-6h4a6 6 0 016 6v1"/></svg>',
+  users: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2 21v-1a5 5 0 015-5h4a5 5 0 015 5v1"/><circle cx="17" cy="9" r="2.5"/><path d="M22 19v-.5a3.5 3.5 0 00-3-3.46"/></svg>',
+  // Rewards
+  gift: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 010-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 000-5C13 2 12 7 12 7z"/></svg>',
+  // Communication
+  megaphone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 11-5.8-1.6"/></svg>',
+  send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>',
+  // Actions
+  withdraw: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>',
+  copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>',
+  link: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.5.5l3-3a5 5 0 00-7-7l-1.5 1.5"/><path d="M14 11a5 5 0 00-7.5-.5l-3 3a5 5 0 007 7l1.5-1.5"/></svg>',
+  share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg>',
+  // Status
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="8 12 11 15 16 9"/></svg>',
+  warning: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.41 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+  clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>',
+  lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>',
+  cross: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>',
+  // Settings
+  bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 01-3.4 0"/></svg>',
+  cat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5l-3-3v6l3-3 3 3V2z" fill="currentColor"/><path d="M5 9c0-2 2-4 7-4s7 2 7 4v6a4 4 0 01-4 4H9a4 4 0 01-4-4V9z"/><circle cx="9" cy="13" r="0.8" fill="currentColor"/><circle cx="15" cy="13" r="0.8" fill="currentColor"/><path d="M11 16h2"/></svg>',
+  // Arrows
+  arrowRight: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="13 6 19 12 13 18"/></svg>',
+  arrowUp: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="6 11 12 5 18 11"/></svg>'
+};
+
+// Helper: render inline icon with sizing
+function ic(name, size) {
+  size = size || 14;
+  return `<span class="ic" style="width:${size}px;height:${size}px">${ICON[name]||''}</span>`;
+}
+
 // ============ TON CONNECT ============
 try {
   tonConnectUI = new TON_CONNECT_UI.TonConnectUI({
@@ -36,7 +78,7 @@ function updateWalletUI(w) {
 }
 
 async function connectWallet() {
-  if (!tonConnectUI) { toast('⚠️ TON Connect not available'); return; }
+  if (!tonConnectUI) { toast('⚠ TON Connect not available'); return; }
   try {
     if (tonConnectUI.connected) {
       if (confirm('Disconnect wallet?')) await tonConnectUI.disconnect();
@@ -75,7 +117,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   const testId = new URLSearchParams(window.location.search).get('id');
   if (testId) { await registerWithId(testId,'Test','','',''); return; }
-  toast('⚠️ Open from @'+BOT_USERNAME);
+  toast('⚠ Open from @'+BOT_USERNAME);
 });
 
 async function registerUser() {
@@ -91,8 +133,8 @@ async function registerWithId(telegramId, firstName, username, photoUrl, refBy) 
     const r = await fetch(API+'/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegramId,firstName,username,photoUrl,refBy})});
     const d = await r.json();
     if (d.success) { userData=d.user; renderAll(); startPendingCounter(); }
-    else toast('⚠️ '+(d.error||'Error'));
-  } catch(e) { toast('⚠️ Connection error'); }
+    else toast('⚠ '+(d.error||'Error'));
+  } catch(e) { toast('⚠ Connection error'); }
 }
 
 async function refreshUser() {
@@ -165,8 +207,8 @@ function renderAll() {
   document.getElementById('friends-title').textContent = T('inviteTitle');
   document.getElementById('friends-sub').textContent = T('inviteSub');
   document.getElementById('ref-label').textContent = T('inviteLink');
-  document.getElementById('btn-share').textContent = '↗ '+T('share');
-  document.getElementById('btn-send').textContent = '✈ '+T('sendChat');
+  document.getElementById('btn-share').innerHTML = ic('share',13)+' '+T('share');
+  document.getElementById('btn-send').innerHTML = ic('send',13)+' '+T('sendChat');
   document.getElementById('ref-count-label').textContent = T('totalRefs');
   document.getElementById('ref-commission-label').textContent = T('commission');
   document.getElementById('nav-miners').textContent = T('miners');
@@ -204,18 +246,18 @@ function renderMiners() {
       const am = userData.activeMiners.find(a=>a.minerId===m.id);
       if (am && am.startsEarningAt && new Date()<new Date(am.startsEarningAt)) {
         const h = Math.ceil((new Date(am.startsEarningAt)-new Date())/3600000);
-        badge = '<div class="miner-badge warmup">⏳ '+h+'h</div>';
+        badge = '<div class="miner-badge warmup">'+ic('clock',11)+' '+h+'h</div>';
       } else {
-        badge = '<div class="miner-badge badge-active">⛏️ '+T('active')+'</div>';
+        badge = '<div class="miner-badge badge-active">'+ic('pickaxe',11)+' '+T('active')+'</div>';
       }
     }
 
     let btnClass = 'buy-btn';
-    let btnText = '⛏️ '+T('buyFor')+' '+m.price+' TON';
-    if (isFree && !owned) { btnClass+=' free'; btnText='✅ '+T('claimNow'); }
+    let btnText = ic('pickaxe',12)+' '+T('buyFor')+' '+m.price+' TON';
+    if (isFree && !owned) { btnClass+=' free'; btnText=ic('check',12)+' '+T('claimNow'); }
     else if (m.level===7 && !owned) btnClass+=' premium';
     else if (m.level===8 && !owned) btnClass+=' legendary';
-    if (owned) { btnClass+=' disabled'; btnText='✅ '+T('owned'); }
+    if (owned) { btnClass+=' disabled'; btnText=ic('check',12)+' '+T('owned'); }
 
     return '<div class="'+cardClass+'"><div class="miner-top"><div class="miner-img"><img src="images/miner-'+m.level+'.png" alt="'+m.name+'" onerror="this.onerror=null;this.parentElement.innerHTML=\'<span style=font-size:32px>'+m.emoji+'</span>\'"></div><div class="miner-info"><div class="miner-name">'+m.name+'<span class="lv">Lv.'+m.level+'</span></div><div class="miner-sub">'+(isFree?T('free'):T('payback')+' ~'+m.payback+T('days'))+'</div></div>'+badge+'</div><div class="miner-stats"><div class="miner-stat"><div class="miner-stat-label">'+T('daily')+'</div><div class="miner-stat-value gold">'+m.daily+'</div></div><div class="miner-stat"><div class="miner-stat-label">'+T('contract')+'</div><div class="miner-stat-value">'+m.days+T('days')+'</div></div><div class="miner-stat"><div class="miner-stat-label">'+T('total')+'</div><div class="miner-stat-value green">'+m.total+'</div></div></div><button class="'+btnClass+'" '+(owned?'disabled':'onclick="buyMiner(\''+m.id+'\')"')+'>'+btnText+'</button></div>';
   }).join('');
@@ -223,7 +265,7 @@ function renderMiners() {
 
 // ============ BUY MINER ============
 async function buyMiner(minerId) {
-  if (!userData) { toast('⚠️ Open from Telegram!'); return; }
+  if (!userData) { toast('⚠ Open from Telegram!'); return; }
   const miner = MINERS.find(m=>m.id===minerId);
   if (!miner) return;
 
@@ -231,7 +273,7 @@ async function buyMiner(minerId) {
     const r = await fetch(API+'/api/miners/buy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegramId:userData.telegramId,minerId})});
     const d = await r.json();
     if (d.success && d.type==='free') {
-      toast('🐱 '+miner.name+' activated! Starts earning in 24h');
+      toast(miner.name+' activated! Starts earning in 24h');
       await refreshUser();
       return;
     }
@@ -241,8 +283,8 @@ async function buyMiner(minerId) {
       showBuyModal(miner, d.memo);
       return;
     }
-    if (d.error) toast('⚠️ '+(d.error||'Error'));
-  } catch(e) { toast('⚠️ Connection error'); }
+    if (d.error) toast('⚠ '+(d.error||'Error'));
+  } catch(e) { toast('⚠ Connection error'); }
 }
 
 function showBuyModal(miner, memo) {
@@ -324,7 +366,7 @@ function showBuyModal(miner, memo) {
       </div>
     </button>
 
-    <div class="buy-info"><span class="ico">⛏️</span> Miner starts earning 24h after verification</div>
+    <div class="buy-info"><span class="ico">${ic('pickaxe',12)}</span> Miner starts earning 24h after verification</div>
   `;
   modal.style.display = 'flex';
 }
@@ -335,7 +377,7 @@ async function payOption1() {
   const amount = currentBuyMiner.price;
   const memo = currentBuyMemo;
 
-  if (!tonConnectUI) { toast('⚠️ Wallet not available'); return; }
+  if (!tonConnectUI) { toast('⚠ Wallet not available'); return; }
 
   if (!tonConnectUI.connected) {
     try {
@@ -436,9 +478,9 @@ async function sendWalletPayment(amount, memo) {
   } catch(e) {
     console.error('[PAYMENT] ❌ Error:', e);
     if (e.message && (e.message.includes('cancel')||e.message.includes('reject')||e.message.includes('declined'))) {
-      toast('❌ Payment cancelled');
+      toast('✕ Payment cancelled');
     } else {
-      toast('⚠️ '+(e.message||'Payment failed'));
+      toast('⚠ '+(e.message||'Payment failed'));
     }
   }
 }
@@ -456,13 +498,13 @@ async function payOption2() {
     });
     const d = await r.json();
     if (d.success) {
-      toast('✅ '+currentBuyMiner.name+' activated! Starts in 24h');
+      toast('✓ '+currentBuyMiner.name+' activated! Starts in 24h');
       document.getElementById('buy-modal').style.display='none';
       await refreshUser();
     } else {
-      toast('⚠️ '+(d.error||'Error'));
+      toast('⚠ '+(d.error||'Error'));
     }
-  } catch(e) { toast('⚠️ '+e.message); }
+  } catch(e) { toast('⚠ '+e.message); }
 }
 
 // ============ OPTION 3: Manual Deposit Page ============
@@ -503,9 +545,9 @@ async function collectEarnings() {
   try {
     const r = await fetch(API+'/api/miners/collect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegramId:userData.telegramId})});
     const d = await r.json();
-    if (d.success) { toast('💰 +'+d.collected.toFixed(4)+' TON'); userData.balance=d.newBalance; updateStats(); }
-    else toast('⚠️ '+(d.error||'Nothing to collect'));
-  } catch(e) { toast('⚠️ Error'); }
+    if (d.success) { toast('+ +'+d.collected.toFixed(4)+' TON'); userData.balance=d.newBalance; updateStats(); }
+    else toast('⚠ '+(d.error||'Nothing to collect'));
+  } catch(e) { toast('⚠ Error'); }
 }
 
 // ============ TASKS (with premium icons) ============
@@ -536,8 +578,9 @@ async function loadTasks() {
 
     const canDaily = !userData||!userData.lastDaily||(Date.now()-new Date(userData.lastDaily).getTime())>=86400000;
     const dailyIco = TASK_ICONS.t_daily;
+    const svgAttrs = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
     let html = `<div class="task-card">
-      <div class="task-icon ${dailyIco.color}"><svg viewBox="0 0 24 24">${dailyIco.svg}</svg></div>
+      <div class="task-icon ${dailyIco.color}"><svg ${svgAttrs}>${dailyIco.svg}</svg></div>
       <div class="task-info"><div class="task-name">${T('dailyReward')}</div><div class="task-reward">+ 0.005~0.015 TON</div></div>
       ${canDaily?'<button class="task-btn claim" onclick="claimDaily()">'+T('claimDaily')+'</button>':'<div class="task-btn done">'+T('taskDone')+'</div>'}
     </div>`;
@@ -546,7 +589,7 @@ async function loadTasks() {
       const done = userData&&userData.completedTasks&&userData.completedTasks.includes(t.taskId);
       const ico = getTaskIcon(t.taskId);
       return `<div class="task-card">
-        <div class="task-icon ${ico.color}"><svg viewBox="0 0 24 24">${ico.svg}</svg></div>
+        <div class="task-icon ${ico.color}"><svg ${svgAttrs}>${ico.svg}</svg></div>
         <div class="task-info"><div class="task-name">${t.title}</div><div class="task-reward">+ ${t.reward} TON</div></div>
         ${done?'<div class="task-btn done">'+T('taskDone')+'</div>':'<button class="task-btn go" onclick="doTask(\''+t.taskId+'\',\''+(t.link||'')+'\','+t.reward+')">'+T('taskGo')+'</button>'}
       </div>`;
@@ -562,8 +605,8 @@ async function doTask(taskId, link, reward) {
   const btn = document.querySelector('[onclick*="'+taskId+'"]');
   if (btn) {
     btn.disabled=true; let sec=15;
-    btn.className='task-btn done'; btn.textContent='⏳ '+sec+'s';
-    const timer=setInterval(()=>{sec--;btn.textContent='⏳ '+sec+'s';if(sec<=0){clearInterval(timer);btn.className='task-btn claim';btn.textContent=T('taskClaim');btn.disabled=false;btn.onclick=()=>claimTask(taskId);}},1000);
+    btn.className='task-btn done'; btn.innerHTML=ic('clock',12)+' '+sec+'s';
+    const timer=setInterval(()=>{sec--;btn.innerHTML=ic('clock',12)+' '+sec+'s';if(sec<=0){clearInterval(timer);btn.className='task-btn claim';btn.textContent=T('taskClaim');btn.disabled=false;btn.onclick=()=>claimTask(taskId);}},1000);
   }
 }
 
@@ -571,10 +614,10 @@ async function claimTask(taskId) {
   try {
     const r = await fetch(API+'/api/tasks/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegramId:userData.telegramId,taskId})});
     const d = await r.json();
-    if (d.success) { toast('✅ +'+d.reward+' TON'); userData.balance=d.newBalance; userData.completedTasks.push(taskId); updateStats(); loadTasks(); }
-    else if (d.error==='NOT_MEMBER') toast('⚠️ Please join the channel first');
-    else toast('⚠️ '+(d.error||'Error'));
-  } catch(e) { toast('⚠️ Error'); }
+    if (d.success) { toast('✓ +'+d.reward+' TON'); userData.balance=d.newBalance; userData.completedTasks.push(taskId); updateStats(); loadTasks(); }
+    else if (d.error==='NOT_MEMBER') toast('⚠ Please join the channel first');
+    else toast('⚠ '+(d.error||'Error'));
+  } catch(e) { toast('⚠ Error'); }
 }
 
 async function claimDaily() {
@@ -582,9 +625,9 @@ async function claimDaily() {
   try {
     const r = await fetch(API+'/api/daily-claim',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegramId:userData.telegramId})});
     const d = await r.json();
-    if (d.success) { toast('🎁 +'+d.reward.toFixed(4)+' TON'); userData.balance=d.newBalance; userData.lastDaily=new Date().toISOString(); updateStats(); loadTasks(); }
-    else if (d.error==='TOO_EARLY') { const diff=new Date(d.nextClaim)-Date.now(); const h=Math.floor(diff/3600000); const m=Math.floor((diff%3600000)/60000); toast('⏰ '+h+'h '+m+'m'); }
-  } catch(e) { toast('⚠️ Error'); }
+    if (d.success) { toast('+ +'+d.reward.toFixed(4)+' TON'); userData.balance=d.newBalance; userData.lastDaily=new Date().toISOString(); updateStats(); loadTasks(); }
+    else if (d.error==='TOO_EARLY') { const diff=new Date(d.nextClaim)-Date.now(); const h=Math.floor(diff/3600000); const m=Math.floor((diff%3600000)/60000); toast('⏱ '+h+'h '+m+'m'); }
+  } catch(e) { toast('⚠ Error'); }
 }
 
 // ============ FRIENDS ============
@@ -599,7 +642,7 @@ async function loadReferrals() {
     if (d.referrals.length>0) {
       document.getElementById('ref-list').innerHTML = d.referrals.map(ref=>{
         const ico = TASK_ICONS.t_invite;
-        return `<div class="task-card"><div class="task-icon purple"><svg viewBox="0 0 24 24">${ico.svg}</svg></div><div class="task-info"><div class="task-name">${ref.firstName||'User'}</div><div class="task-reward">${ref.isPaid?'✅ Paid':'⏳ Free'}</div></div></div>`;
+        return `<div class="task-card"><div class="task-icon purple"><svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="currentColor">${ico.svg}</svg></div><div class="task-info"><div class="task-name">${ref.firstName||'User'}</div><div class="task-reward">${ref.isPaid?ic('checkSimple',11)+' Paid':ic('clock',11)+' Free'}</div></div></div>`;
       }).join('');
     }
   } catch(e) {}
@@ -625,21 +668,21 @@ async function submitWithdraw() {
   if (!userData) return;
   const amount=parseFloat(document.getElementById('w-amount').value);
   const wallet=document.getElementById('w-wallet').value.trim();
-  if (!amount||amount<1.5){toast('⚠️ Min 1.5 TON');return;}
-  if (!wallet||wallet.length<20){toast('⚠️ Invalid wallet');return;}
+  if (!amount||amount<1.5){toast('⚠ Min 1.5 TON');return;}
+  if (!wallet||wallet.length<20){toast('⚠ Invalid wallet');return;}
   try {
     const r = await fetch(API+'/api/withdrawals/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegramId:userData.telegramId,amount,walletAddress:wallet})});
     const d = await r.json();
-    if (d.success) { toast('✅ '+T('withdrawSubmitted')); document.getElementById('withdraw-modal').style.display='none'; refreshUser(); }
+    if (d.success) { toast('✓ '+T('withdrawSubmitted')); document.getElementById('withdraw-modal').style.display='none'; refreshUser(); }
     else {
-      if (d.error==='DEPOSIT_REQUIRED') toast('🔒 '+T('depositRequired'));
-      else if (d.error==='REFS_REQUIRED') toast('🔒 '+T('refsRequired')+' ('+(d.current||0)+'/2)');
-      else if (d.error==='INSUFFICIENT') toast('⚠️ '+T('insufficientBalance'));
-      else if (d.error==='MIN_AMOUNT') toast('⚠️ Min 1.5 TON');
-      else if (d.error==='PENDING_EXISTS') toast('⚠️ You have a pending withdrawal');
-      else toast('⚠️ '+(d.message||d.error));
+      if (d.error==='DEPOSIT_REQUIRED') toast('⊘ '+T('depositRequired'));
+      else if (d.error==='REFS_REQUIRED') toast('⊘ '+T('refsRequired')+' ('+(d.current||0)+'/2)');
+      else if (d.error==='INSUFFICIENT') toast('⚠ '+T('insufficientBalance'));
+      else if (d.error==='MIN_AMOUNT') toast('⚠ Min 1.5 TON');
+      else if (d.error==='PENDING_EXISTS') toast('⚠ You have a pending withdrawal');
+      else toast('⚠ '+(d.message||d.error));
     }
-  } catch(e) { toast('⚠️ Error'); }
+  } catch(e) { toast('⚠ Error'); }
 }
 
 // ============ STATS ============
@@ -650,6 +693,13 @@ function updateStats() {
   document.getElementById('profile-name').textContent = userData.firstName||'Player';
   document.getElementById('profile-id').textContent = 'ID: '+userData.telegramId;
   if (userData.photoUrl) document.getElementById('profile-avatar').innerHTML='<img src="'+userData.photoUrl+'" onerror="this.style.display=\'none\'">';
+  else document.getElementById('profile-avatar').innerHTML = ic('user', 56);
+
+  // Set stat icons
+  const profIco = document.getElementById('stat-ico-profit');
+  const minersIco = document.getElementById('stat-ico-miners');
+  if (profIco && !profIco.innerHTML) profIco.innerHTML = ic('trending', 20);
+  if (minersIco && !minersIco.innerHTML) minersIco.innerHTML = ic('pickaxe', 20);
   document.getElementById('wallet-card-balance').textContent = (userData.balance||0).toFixed(4)+' TON';
   document.getElementById('wallet-card-usd').textContent = '≈ $'+((userData.balance||0)*5).toFixed(2);
   document.getElementById('ps-invested').textContent = (userData.totalInvested||0).toFixed(2)+' TON';
@@ -663,7 +713,7 @@ function updateStats() {
 function copyRefLink() { navigator.clipboard.writeText(document.getElementById('ref-link').value); toast(T('copied')); }
 function shareRef() { const l=document.getElementById('ref-link').value; if(tg) tg.openTelegramLink('https://t.me/share/url?url='+encodeURIComponent(l)+'&text='+encodeURIComponent('⛏️🐱 Join Cats Mining!')); }
 function sendRefChat() { const l=document.getElementById('ref-link').value; if(tg) tg.switchInlineQuery('⛏️🐱 '+l,['users']); }
-function copyText(text) { navigator.clipboard.writeText(text); toast('📋 Copied!'); }
+function copyText(text) { navigator.clipboard.writeText(text); toast('Copied — Copied!'); }
 
 function toast(msg) {
   const t=document.getElementById('toast');
