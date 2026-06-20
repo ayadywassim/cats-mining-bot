@@ -16,7 +16,7 @@ const ICON = {
   diamond: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12l4 6-10 13L2 9z"/><path d="M11 3L8 9l4 13 4-13-3-6"/><path d="M2 9h20"/></svg>',
   wallet: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M16 14a2 2 0 010-4h6v4z"/></svg>',
   // Mining
-  pickaxe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4l6 6-9.5 9.5a2.5 2.5 0 01-3.5-3.5L16 7"/><circle cx="18" cy="6" r="1.5" fill="currentColor"/></svg>',
+  pickaxe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2L14 6.5 8.5 12 4 7.5z"/><path d="M16 4l4 4"/><path d="M8.5 12l-6 6 2 2 6-6"/></svg>',
   // People
   user: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 016-6h4a6 6 0 016 6v1"/></svg>',
   users: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2 21v-1a5 5 0 015-5h4a5 5 0 015 5v1"/><circle cx="17" cy="9" r="2.5"/><path d="M22 19v-.5a3.5 3.5 0 00-3-3.46"/></svg>',
@@ -445,31 +445,23 @@ function buildTonCommentBOC(text) {
 
 async function sendWalletPayment(amount, memo) {
   try {
-    console.log('[PAYMENT] ════════ Starting TON Connect payment ════════');
+    console.log('[PAYMENT] ════════ TON Connect payment ════════');
     console.log('[PAYMENT] Amount:', amount, 'TON');
     console.log('[PAYMENT] Memo:', memo);
     console.log('[PAYMENT] To:', BOT_WALLET);
 
-    const lastDigits = parseInt(userData.telegramId.slice(-4)) || 0;
-    const uniqueAmount = +(amount + (lastDigits / 1000000)).toFixed(6);
-    const amountNano = Math.round(uniqueAmount * 1e9).toString();
-
-    console.log('[PAYMENT] Unique amount:', uniqueAmount, 'TON');
+    const amountNano = Math.round(amount * 1e9).toString();
     console.log('[PAYMENT] Nano:', amountNano);
 
     // Build payload with proper BOC format
     const payload = buildTonCommentBOC(memo);
-    console.log('[PAYMENT] Payload built:', payload ? 'YES ('+payload.length+' chars)' : 'NO (fallback to amount only)');
+    console.log('[PAYMENT] Payload BOC:', payload ? 'YES ('+payload.length+' chars)' : 'NO');
 
     const message = {
       address: BOT_WALLET,
       amount: amountNano
     };
-
-    // Add payload only if successfully built
-    if (payload) {
-      message.payload = payload;
-    }
+    if (payload) message.payload = payload;
 
     const tx = {
       validUntil: Math.floor(Date.now()/1000) + 600,
@@ -479,7 +471,6 @@ async function sendWalletPayment(amount, memo) {
     console.log('[PAYMENT] Sending transaction...');
     const result = await tonConnectUI.sendTransaction(tx);
     console.log('[PAYMENT] ✅ Transaction sent!');
-    console.log('[PAYMENT] BOC:', result.boc ? result.boc.slice(0,40)+'...' : 'no boc');
 
     document.getElementById('buy-modal').style.display='none';
     showSentPage(currentBuyMiner);
@@ -521,13 +512,10 @@ function payOption3() {
   if (!currentBuyMiner || !currentBuyMemo) return;
   document.getElementById('buy-modal').style.display='none';
 
-  const lastDigits = parseInt(userData.telegramId.slice(-4)) || 0;
-  const uniqueAmount = currentBuyMiner.price + (lastDigits / 1000000);
-
-  document.getElementById('manual-amt-val').textContent = uniqueAmount.toFixed(6)+' TON';
+  document.getElementById('manual-amt-val').textContent = currentBuyMiner.price+' TON';
   document.getElementById('manual-addr-val').textContent = BOT_WALLET;
   document.getElementById('manual-memo-val').textContent = currentBuyMemo;
-  document.getElementById('manual-warn-amt').textContent = uniqueAmount.toFixed(6);
+  document.getElementById('manual-warn-amt').textContent = currentBuyMiner.price;
 
   goPage('manual', null);
 }

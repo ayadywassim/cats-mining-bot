@@ -130,6 +130,9 @@ const taskSchema = new mongoose.Schema({
   reward: Number,
   link: String,
   type: { type: String, default: 'channel' },
+  requireMiner: { type: Boolean, default: false },
+  requireDeposit: { type: Boolean, default: false },
+  requireReferrals: { type: Number, default: 0 },
   enabled: { type: Boolean, default: true }
 });
 const Task = mongoose.model('CatsMiningTask', taskSchema);
@@ -338,30 +341,28 @@ app.post('/api/miners/buy', async (req, res) => {
       return res.json({ success: true, miner, type: 'free' });
     }
 
-    // Paid miner — create pending deposit with unique tracking amount
+    // Paid miner — create pending deposit
     const tgId = telegramId.toString();
-    const lastDigits = parseInt(tgId.slice(-4)) || 0;
-    const uniqueAmount = +(minerConfig.price + (lastDigits / 1000000)).toFixed(6);
     const depositId = Math.random().toString(36).substring(2, 8).toUpperCase();
     const memo = `CM${tgId}_${depositId}`;
 
     const deposit = new Deposit({
       telegramId: tgId,
       amount: minerConfig.price,
-      uniqueAmount: uniqueAmount,
+      uniqueAmount: minerConfig.price,
       minerId: minerConfig.id,
       memo: memo
     });
     await deposit.save();
 
-    console.log(`[PAYMENT] Created deposit: user=${tgId} miner=${minerConfig.id} amount=${minerConfig.price} unique=${uniqueAmount} memo=${memo}`);
+    console.log(`[PAYMENT] Created deposit: user=${tgId} miner=${minerConfig.id} amount=${minerConfig.price} memo=${memo}`);
 
     res.json({
       success: true,
       type: 'deposit_required',
       walletAddress: process.env.BOT_WALLET,
       amount: minerConfig.price,
-      uniqueAmount: uniqueAmount,
+      uniqueAmount: minerConfig.price,
       memo: memo,
       depositId: deposit._id.toString()
     });
@@ -637,13 +638,23 @@ app.post('/api/tasks/complete', async (req, res) => {
 
     // ─── SERVER-SIDE TASK VALIDATION ───
 
-    // Task: Buy First Miner — verify user owns at least 1 active miner
+    // Task: Buy First Miner — verify user owns at least 1 PAID miner (not free Kitty)
     if (taskId === 't_miner' || taskId.includes('miner') || (task.requireMiner)) {
-      const hasMiner = await ActiveMiner.findOne({ telegramId: tgId });
-      if (!hasMiner) {
-        console.log(`[TASK] ❌ ${tgId} no miner for ${taskId}`);
-        return res.status(400).json({ error: 'NO_MINER', message: 'You must buy a miner first' });
+      // Must have a verified PAID deposit, OR an active miner with price > 0
+      const hasVerifiedDeposit = await Deposit.findOne({
+        telegramId: tgId,
+        status: 'verified',
+        amount: { $gte: 0.5 }   // free miner has price 0, so this excludes it
+      });
+      const hasPaidMiner = await ActiveMiner.findOne({
+        telegramId: tgId,
+        price: { $gt: 0 }
+      });
+      if (!hasVerifiedDeposit && !hasPaidMiner) {
+        console.log(`[TASK] ❌ ${tgId} no PAID miner for ${taskId}`);
+        return res.status(400).json({ error: 'NO_MINER', message: 'You must buy a paid miner first (Kitty does not count)' });
       }
+      console.log(`[TASK] ✅ ${tgId} has paid miner verification`);
     }
 
     // Task: Deposit — verify at least one verified deposit
@@ -880,17 +891,25 @@ async function verifyDeposits() {
         }
       }
 
-      // ─── PRIORITY 3: EXACT AMOUNT MATCH ───
+      // ─── PRIORITY 3: EXACT AMOUNT MATCH (most recent first) ───
+      // Only works if no race condition (one pending per amount)
       if (!matchedDep) {
-        // Sort by createdAt (newest first) for best UX
+        // Group pending by amount — only match if unique
         const sorted = [...pending].sort((a, b) => b.createdAt - a.createdAt);
         for (const dep of sorted) {
-          // Match if amount is between expected and expected+0.01 (allow small extra for fees)
           if (amountTON >= dep.amount * 0.99 && amountTON <= dep.amount * 1.05) {
-            matchedDep = dep;
-            matchMethod = 'EXACT_AMOUNT';
-            console.log(`[MATCH] ✅ EXACT_AMOUNT match: ${amountTON} ≈ ${dep.amount}`);
-            break;
+            // Check: is this the only pending with this amount?
+            const sameAmount = pending.filter(p => 
+              p.amount === dep.amount && p._id.toString() !== dep._id.toString()
+            );
+            if (sameAmount.length === 0) {
+              matchedDep = dep;
+              matchMethod = 'EXACT_AMOUNT';
+              console.log(`[MATCH] ✅ EXACT_AMOUNT match: ${amountTON} ≈ ${dep.amount}`);
+              break;
+            } else {
+              console.log(`[MATCH] ⚠️ Amount ${dep.amount} matches multiple deposits - requires memo`);
+            }
           }
         }
       }
@@ -1009,7 +1028,7 @@ async function seedTasks() {
   await Task.insertMany([
     { taskId: 't_news', title: 'Join News Channel', icon: '📢', reward: 0.02, link: `https://t.me/${(process.env.NEWS_CHANNEL || '').replace('@','')}`, type: 'channel' },
     { taskId: 't_payouts', title: 'Join Payouts Channel', icon: '💸', reward: 0.02, link: `https://t.me/${(process.env.PROOF_CHANNEL || '').replace('@','')}`, type: 'channel' },
-    { taskId: 't_miner', title: 'Buy your first miner', icon: '⛏️', reward: 0.05, type: 'action' }
+    { taskId: 't_miner', title: 'Buy your first miner', icon: '⛏️', reward: 0.05, type: 'action', requireMiner: true, requireDeposit: true }
   ]);
   console.log('✅ Tasks seeded');
 }
@@ -1214,6 +1233,21 @@ app.post('/api/admin/broadcast', adminAuth, async (req, res) => {
       } catch (e) { failed++; }
     }
     res.json({ success: true, sent, failed });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Reseed tasks (deletes all then re-creates)
+app.post('/api/admin/reseed-tasks', adminAuth, async (req, res) => {
+  try {
+    await Task.deleteMany({});
+    await Task.insertMany([
+      { taskId: 't_news', title: 'Join News Channel', icon: '📢', reward: 0.02, link: `https://t.me/${(process.env.NEWS_CHANNEL || '').replace('@','')}`, type: 'channel' },
+      { taskId: 't_payouts', title: 'Join Payouts Channel', icon: '💸', reward: 0.02, link: `https://t.me/${(process.env.PROOF_CHANNEL || '').replace('@','')}`, type: 'channel' },
+      { taskId: 't_miner', title: 'Buy your first miner', icon: '⛏️', reward: 0.05, type: 'action', requireMiner: true, requireDeposit: true }
+    ]);
+    res.json({ success: true, message: 'Tasks reseeded' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
