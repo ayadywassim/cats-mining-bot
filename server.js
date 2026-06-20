@@ -556,23 +556,7 @@ app.post('/api/withdrawals/request', async (req, res) => {
     const pending = await Withdrawal.findOne({ telegramId: tgId, status: 'pending' });
     if (pending) return res.status(400).json({ error: 'PENDING_EXISTS', message: 'You have a pending withdrawal' });
 
-    // CHECK 1: Must have verified deposit (unless bypassed)
-    if (!user.withdrawBypass) {
-      const verifiedDeposit = await Deposit.findOne({
-        telegramId: tgId, status: 'verified', amount: { $gte: 0.5 }
-      });
-      if (!verifiedDeposit) return res.status(400).json({ error: 'DEPOSIT_REQUIRED' });
-
-      // CHECK 2: 2 paid referrals
-      let paidRefs = 0;
-      for (const refId of user.referrals) {
-        const dep = await Deposit.findOne({ telegramId: refId.toString(), status: 'verified', amount: { $gte: 0.5 } });
-        if (dep) { paidRefs++; if (paidRefs >= 2) break; }
-      }
-      if (paidRefs < 2) return res.status(400).json({ error: 'REFS_REQUIRED', current: paidRefs, required: 2 });
-    }
-
-    // CHECK 3: Amount limits
+    // CHECK: Amount limits only
     if (amt < 1.5) return res.status(400).json({ error: 'MIN_AMOUNT' });
     if (amt > 1000) return res.status(400).json({ error: 'MAX_AMOUNT' });
 
@@ -612,7 +596,6 @@ app.post('/api/withdrawals/request', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-
 
 // ============ API: TASKS ============
 app.get('/api/tasks', async (req, res) => {
@@ -1043,13 +1026,22 @@ function adminAuth(req, res, next) {
 // ============ ADMIN ENDPOINTS ============
 app.get('/api/admin/stats', adminAuth, async (req, res) => {
   try {
-    const users = await User.countDocuments();
+    const totalUsers = await User.countDocuments();
     const activeMiners = await ActiveMiner.countDocuments({ status: 'active' });
     const pendingW = await Withdrawal.countDocuments({ status: 'pending' });
     const pendingD = await Deposit.countDocuments({ status: 'pending' });
     const verifiedD = await Deposit.countDocuments({ status: 'verified' });
-    const totalDeposited = await Deposit.aggregate([{ $match: { status: 'verified' } }, { $group: { _id: null, total: { $sum: '$amount' } } }]);
-    res.json({ success: true, users, activeMiners, pendingW, pendingD, verifiedD, totalDeposited: totalDeposited[0]?.total || 0 });
+    const bannedUsers = await User.countDocuments({ banned: true });
+    const totalDepAgg = await Deposit.aggregate([{ $match: { status: 'verified' } }, { $group: { _id: null, total: { $sum: '$amount' } } }]);
+    const totalWdAgg = await Withdrawal.aggregate([{ $match: { status: 'approved' } }, { $group: { _id: null, total: { $sum: '$netAmount' } } }]);
+    const totalEarnAgg = await User.aggregate([{ $group: { _id: null, total: { $sum: '$totalEarned' } } }]);
+    res.json({
+      success: true,
+      totalUsers, activeMiners, pendingW, pendingD, verifiedD, bannedUsers,
+      totalDeposited: totalDepAgg[0]?.total || 0,
+      totalWithdrawn: totalWdAgg[0]?.total || 0,
+      totalEarned: totalEarnAgg[0]?.total || 0
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1223,22 +1215,221 @@ app.post('/api/admin/reject-withdrawal', adminAuth, async (req, res) => {
 
 app.post('/api/admin/broadcast', adminAuth, async (req, res) => {
   try {
-    const { message } = req.body;
-    const users = await User.find({});
+    const { message, imageUrl, buttonText, buttonUrl } = req.body;
+    if (!message) return res.status(400).json({ error: 'EMPTY_MESSAGE' });
+    const users = await User.find({ banned: { $ne: true } });
     let sent = 0, failed = 0;
+
+    const replyMarkup = (buttonText && buttonUrl) ? {
+      inline_keyboard: [[{ text: buttonText, url: buttonUrl }]]
+    } : undefined;
+
     for (const u of users) {
       try {
-        await bot.sendMessage(u.telegramId, message, { parse_mode: 'Markdown' });
+        if (imageUrl) {
+          await bot.sendPhoto(u.telegramId, imageUrl, {
+            caption: message,
+            parse_mode: 'HTML',
+            reply_markup: replyMarkup
+          });
+        } else {
+          await bot.sendMessage(u.telegramId, message, {
+            parse_mode: 'HTML',
+            reply_markup: replyMarkup
+          });
+        }
         sent++;
       } catch (e) { failed++; }
+      // Telegram rate limit: 30 msgs/sec — sleep 50ms = max 20/sec
+      await new Promise(r => setTimeout(r, 50));
     }
+    console.log(`[BROADCAST] sent=${sent} failed=${failed}`);
     res.json({ success: true, sent, failed });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Reseed tasks (deletes all then re-creates)
+// Manual deposit credit (admin manually verifies & activates)
+app.post('/api/admin/manual-deposit', adminAuth, async (req, res) => {
+  try {
+    const { telegramId, amount, minerId } = req.body;
+    const tgId = telegramId.toString();
+    const amt = parseFloat(amount);
+    if (!tgId || !amt || amt <= 0) return res.status(400).json({ error: 'INVALID_INPUT' });
+
+    const user = await User.findOne({ telegramId: tgId });
+    if (!user) return res.status(404).json({ error: 'USER_NOT_FOUND' });
+
+    const deposit = new Deposit({
+      telegramId: tgId,
+      amount: amt,
+      minerId: minerId || 'manual',
+      memo: 'ADMIN_MANUAL_' + Date.now(),
+      status: 'verified',
+      matchMethod: 'ADMIN_MANUAL',
+      txHash: 'MANUAL_' + Date.now(),
+      verifiedAt: new Date()
+    });
+    await deposit.save();
+
+    await User.findOneAndUpdate(
+      { telegramId: tgId },
+      { $inc: { totalDeposited: amt, totalInvested: amt } }
+    );
+
+    // Activate miner if minerId provided
+    if (minerId && minerId !== 'manual') {
+      const minerConfig = MINERS_CONFIG.find(m => m.id === minerId);
+      if (minerConfig) {
+        const activateAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+        await ActiveMiner.create({
+          telegramId: tgId,
+          minerId: minerConfig.id,
+          minerName: minerConfig.name,
+          level: minerConfig.level,
+          price: minerConfig.price,
+          daily: minerConfig.daily,
+          totalReturn: minerConfig.total,
+          startsEarningAt: activateAt,
+          expiresAt: new Date(activateAt.getTime() + minerConfig.days * 24 * 60 * 60 * 1000)
+        });
+      }
+    }
+
+    try {
+      await bot.sendMessage(tgId, `✅ Deposit of ${amt} TON credited by admin!`, { parse_mode: 'Markdown' });
+    } catch(e) {}
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Deposits list
+app.get('/api/admin/deposits', adminAuth, async (req, res) => {
+  try {
+    const status = req.query.status;
+    const query = status ? { status } : {};
+    const deposits = await Deposit.find(query).sort({ createdAt: -1 }).limit(200);
+    res.json({ success: true, deposits });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Referrals audit log
+app.get('/api/admin/referrals', adminAuth, async (req, res) => {
+  try {
+    const status = req.query.status;
+    const query = status ? { status } : {};
+    const refs = await ReferralLog.find(query).sort({ createdAt: -1 }).limit(200);
+    res.json({ success: true, referrals: refs });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Tasks management
+app.get('/api/admin/tasks', adminAuth, async (req, res) => {
+  try {
+    const tasks = await Task.find({}).sort({ createdAt: 1 });
+    res.json({ success: true, tasks });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/admin/tasks/create', adminAuth, async (req, res) => {
+  try {
+    const { title, icon, reward, link, type, requireMiner, requireDeposit } = req.body;
+    const taskId = 't_' + Math.random().toString(36).substring(2, 8);
+    await Task.create({
+      taskId,
+      title,
+      icon: icon || '📋',
+      reward: parseFloat(reward) || 0.01,
+      link: link || '',
+      type: type || 'channel',
+      requireMiner: !!requireMiner,
+      requireDeposit: !!requireDeposit,
+      enabled: true
+    });
+    res.json({ success: true, taskId });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/admin/tasks/toggle', adminAuth, async (req, res) => {
+  try {
+    const { taskId } = req.body;
+    const task = await Task.findOne({ taskId });
+    if (!task) return res.status(404).json({ error: 'NOT_FOUND' });
+    task.enabled = !task.enabled;
+    await task.save();
+    res.json({ success: true, enabled: task.enabled });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/admin/tasks/delete', adminAuth, async (req, res) => {
+  try {
+    const { taskId } = req.body;
+    await Task.deleteOne({ taskId });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Withdraw approve/reject
+app.post('/api/admin/approve-withdrawal', adminAuth, async (req, res) => {
+  try {
+    const { withdrawalId, txHash } = req.body;
+    const wd = await Withdrawal.findById(withdrawalId);
+    if (!wd) return res.status(404).json({ error: 'NOT_FOUND' });
+    if (wd.status !== 'pending') return res.status(400).json({ error: 'ALREADY_PROCESSED' });
+    wd.status = 'approved';
+    wd.txHash = txHash || 'manual';
+    await wd.save();
+    await User.findOneAndUpdate(
+      { telegramId: wd.telegramId },
+      { $inc: { totalWithdrawn: wd.netAmount } }
+    );
+    try {
+      await bot.sendMessage(wd.telegramId, `✅ Withdrawal approved!\n\n💰 Amount: ${wd.netAmount} TON\n📍 To: \`${wd.walletAddress}\`\n🔗 TX: ${txHash || 'manual'}`, { parse_mode: 'Markdown' });
+    } catch(e) {}
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/admin/reject-withdrawal', adminAuth, async (req, res) => {
+  try {
+    const { withdrawalId } = req.body;
+    const wd = await Withdrawal.findById(withdrawalId);
+    if (!wd) return res.status(404).json({ error: 'NOT_FOUND' });
+    if (wd.status !== 'pending') return res.status(400).json({ error: 'ALREADY_PROCESSED' });
+    wd.status = 'rejected';
+    await wd.save();
+    // Refund balance
+    await User.findOneAndUpdate(
+      { telegramId: wd.telegramId },
+      { $inc: { balance: wd.amount } }
+    );
+    try {
+      await bot.sendMessage(wd.telegramId, `❌ Withdrawal rejected. ${wd.amount} TON refunded to your balance.`);
+    } catch(e) {}
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/api/admin/reseed-tasks', adminAuth, async (req, res) => {
   try {
     await Task.deleteMany({});
