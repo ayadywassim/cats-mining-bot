@@ -742,9 +742,9 @@ body::before{
     drop-shadow(0 0 16px rgba(240,160,48,.45));
 }
 
-/* Bottom nav (large, animated on active) */
+/* Bottom nav (match other nav icons size) */
 .nav-cat{
-  width:26px;height:26px;object-fit:contain;
+  width:22px;height:22px;object-fit:contain;
   filter:
     brightness(0) saturate(100%)
     invert(48%) sepia(7%) saturate(450%) hue-rotate(202deg) brightness(94%) contrast(85%);
@@ -789,7 +789,7 @@ body::before{
 @media(max-width:380px){
   .mini-cat{width:24px;height:24px}
   .stat-cat{width:32px;height:32px}
-  .nav-cat{width:24px;height:24px}
+  .nav-cat{width:20px;height:20px}
   .cat-btn{width:20px;height:20px}
 }
 
