@@ -322,22 +322,22 @@ body::before{
 
 .miner-top{display:flex;align-items:center;gap:12px;margin-bottom:12px;position:relative;z-index:1}
 .miner-img{
-  width:60px;height:60px;border-radius:14px;
+  width:72px;height:72px;border-radius:16px;
   background:var(--cd);overflow:hidden;flex-shrink:0;
   border:1px solid var(--bd-glow);
-  box-shadow:0 6px 16px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.06);
+  box-shadow:0 6px 18px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.08);
   position:relative;
 }
 .miner-img::after{
   content:'';position:absolute;inset:0;
-  background:linear-gradient(135deg,rgba(255,255,255,.08),transparent 50%);
+  background:linear-gradient(135deg,rgba(255,255,255,.1),transparent 50%);
   pointer-events:none;
 }
 .miner-img img{width:100%;height:100%;object-fit:cover}
 .miner-info{flex:1;min-width:0}
-.miner-name{font-size:16px;font-weight:800;letter-spacing:-.02em}
+.miner-name{font-size:17px;font-weight:800;letter-spacing:-.02em}
 .miner-name .lv{font-size:11px;color:var(--blue-l);font-weight:700;margin-left:6px;background:rgba(0,152,234,.18);padding:2px 8px;border-radius:6px;border:1px solid rgba(0,152,234,.25)}
-.miner-sub{font-size:12px;color:var(--dm);margin-top:3px;font-weight:500}
+.miner-sub{font-size:12px;color:var(--dm);margin-top:4px;font-weight:500}
 .miner-badge{font-size:10px;padding:5px 10px;border-radius:8px;font-weight:800;white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
 .badge-active{background:rgba(16,185,129,.18);color:var(--green);border:1px solid rgba(16,185,129,.35);box-shadow:0 0 12px rgba(16,185,129,.25)}
 .miner-badge.warmup{background:rgba(240,160,48,.18);color:var(--amber-l);border:1px solid rgba(240,160,48,.35);box-shadow:0 0 12px var(--amber-glow)}
@@ -696,12 +696,12 @@ body::before{
 
 /* ============ NAV ============ */
 .nav{position:fixed;bottom:0;left:0;right:0;background:rgba(8,8,16,.96);backdrop-filter:blur(20px);border-top:1px solid var(--bd);display:flex;justify-content:space-around;padding:8px 0 18px;z-index:50;box-shadow:0 -4px 24px rgba(0,0,0,.4)}
-.nav-i{text-align:center;cursor:pointer;padding:6px 18px;opacity:.4;transition:opacity .15s;position:relative}
+.nav-i{text-align:center;cursor:pointer;padding:6px 16px;opacity:.4;transition:opacity .15s;position:relative}
 .nav-i.active{opacity:1}
-.nav-i.active::before{content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);width:24px;height:2px;background:var(--amber);border-radius:2px;box-shadow:0 0 8px var(--amber-glow)}
-.nav-svg{width:22px;height:22px;color:var(--dm);stroke:currentColor;fill:none}
-.nav-i.active .nav-svg{color:var(--amber-l)}
-.nav-t{font-size:9px;margin-top:3px;color:var(--dm);font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+.nav-i.active::before{content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);width:30px;height:2px;background:var(--amber);border-radius:2px;box-shadow:0 0 8px var(--amber-glow)}
+.nav-svg{width:28px;height:28px;color:var(--dm);stroke:currentColor;fill:none}
+.nav-i.active .nav-svg{color:var(--amber-l);filter:drop-shadow(0 0 6px var(--amber-glow))}
+.nav-t{font-size:10px;margin-top:4px;color:var(--dm);font-weight:700;text-transform:uppercase;letter-spacing:.06em}
 .nav-i.active .nav-t{color:var(--amber-l)}
 
 /* ============ TOAST ============ */
@@ -744,7 +744,7 @@ body::before{
 
 /* Bottom nav (match other nav icons size) */
 .nav-cat{
-  width:22px;height:22px;object-fit:contain;
+  width:28px;height:28px;object-fit:contain;
   filter:
     brightness(0) saturate(100%)
     invert(48%) sepia(7%) saturate(450%) hue-rotate(202deg) brightness(94%) contrast(85%);
@@ -789,7 +789,8 @@ body::before{
 @media(max-width:380px){
   .mini-cat{width:24px;height:24px}
   .stat-cat{width:32px;height:32px}
-  .nav-cat{width:20px;height:20px}
+  .nav-cat{width:24px;height:24px}
+  .nav-svg{width:24px;height:24px}
   .cat-btn{width:20px;height:20px}
 }
 

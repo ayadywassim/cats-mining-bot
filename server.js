@@ -874,6 +874,35 @@ app.post('/api/tasks/complete', async (req, res) => {
         { new: true }
       );
       console.log(`[TASK-DAILY] ✅ ${tgId} claimed ${taskId} +${finalReward} TON`);
+
+      // ─── REFERRAL ACTIVATION ───
+      // If user has a referrer AND this is daily reward + first claim → validate referral
+      if (updated && updated.referredBy && taskId === 't_daily_reward') {
+        const refLog = await ReferralLog.findOne({
+          referrerId: updated.referredBy,
+          referredId: tgId,
+          status: 'pending'
+        });
+        if (refLog) {
+          refLog.status = 'valid';
+          refLog.reason = 'claimed_daily_reward';
+          refLog.verifiedAt = new Date();
+          await refLog.save();
+          console.log(`[REFERRAL] ✅ ${tgId} validated for ${updated.referredBy} (claimed daily)`);
+
+          // Check milestones for referrer
+          try { await checkMilestones(updated.referredBy); } catch(e) {}
+
+          // Notify referrer
+          try {
+            await bot.sendMessage(updated.referredBy,
+              `🎉 *New Valid Referral!*\n\n@${updated.username||updated.firstName||'user'} just claimed their first daily reward.\n\n✅ Counts toward your milestones!`,
+              { parse_mode: 'Markdown' }
+            );
+          } catch(e) {}
+        }
+      }
+
       return res.json({ success: true, reward: finalReward, newBalance: updated.balance, daily: true });
     }
 
