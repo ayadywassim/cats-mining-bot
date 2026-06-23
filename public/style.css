@@ -696,12 +696,12 @@ body::before{
 
 /* ============ NAV ============ */
 .nav{position:fixed;bottom:0;left:0;right:0;background:rgba(8,8,16,.96);backdrop-filter:blur(20px);border-top:1px solid var(--bd);display:flex;justify-content:space-around;padding:8px 0 18px;z-index:50;box-shadow:0 -4px 24px rgba(0,0,0,.4)}
-.nav-i{text-align:center;cursor:pointer;padding:6px 16px;opacity:.4;transition:opacity .15s;position:relative}
+.nav-i{text-align:center;cursor:pointer;padding:6px 18px;opacity:.4;transition:opacity .15s;position:relative}
 .nav-i.active{opacity:1}
-.nav-i.active::before{content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);width:30px;height:2px;background:var(--amber);border-radius:2px;box-shadow:0 0 8px var(--amber-glow)}
-.nav-svg{width:28px;height:28px;color:var(--dm);stroke:currentColor;fill:none}
-.nav-i.active .nav-svg{color:var(--amber-l);filter:drop-shadow(0 0 6px var(--amber-glow))}
-.nav-t{font-size:10px;margin-top:4px;color:var(--dm);font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+.nav-i.active::before{content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);width:24px;height:2px;background:var(--amber);border-radius:2px;box-shadow:0 0 8px var(--amber-glow)}
+.nav-svg{width:22px;height:22px;color:var(--dm);stroke:currentColor;fill:none}
+.nav-i.active .nav-svg{color:var(--amber-l)}
+.nav-t{font-size:9px;margin-top:3px;color:var(--dm);font-weight:700;text-transform:uppercase;letter-spacing:.06em}
 .nav-i.active .nav-t{color:var(--amber-l)}
 
 /* ============ TOAST ============ */
@@ -742,9 +742,9 @@ body::before{
     drop-shadow(0 0 16px rgba(240,160,48,.45));
 }
 
-/* Bottom nav (match other nav icons size) */
+/* Bottom nav cat icon - slightly bigger than svg icons for visibility */
 .nav-cat{
-  width:28px;height:28px;object-fit:contain;
+  width:26px;height:26px;object-fit:contain;
   filter:
     brightness(0) saturate(100%)
     invert(48%) sepia(7%) saturate(450%) hue-rotate(202deg) brightness(94%) contrast(85%);
@@ -789,8 +789,7 @@ body::before{
 @media(max-width:380px){
   .mini-cat{width:24px;height:24px}
   .stat-cat{width:32px;height:32px}
-  .nav-cat{width:24px;height:24px}
-  .nav-svg{width:24px;height:24px}
+  .nav-cat{width:22px;height:22px}
   .cat-btn{width:20px;height:20px}
 }
 
