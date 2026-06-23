@@ -599,7 +599,10 @@ async function loadTasks() {
   try {
     const r = await fetch(API+'/api/tasks?telegramId='+(userData?.telegramId||''));
     const d = await r.json();
+    console.log('[TASKS] Got from API:', d);
     if (!d.success) return;
+    console.log('[TASKS] Current tab:', currentTaskTab);
+    console.log('[TASKS] Tasks:', (d.tasks||[]).map(t => ({id: t.taskId, isDaily: t.isDaily, category: t.category})));
 
     const svgAttrs = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
 
