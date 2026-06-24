@@ -760,7 +760,9 @@ function renderEventBanner() {
       <div class="sale-banner-shine"></div>
 
       <div class="sale-left">
-        <div class="sale-fire">🔥</div>
+        <div class="sale-fire">
+          <img src="images/sale-icon.png" alt="" onerror="this.outerHTML='<svg viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; xmlns=&quot;http://www.w3.org/2000/svg&quot;><path d=&quot;M12 2 L13.5 7 L19 7 L14.5 10.5 L16 16 L12 13 L8 16 L9.5 10.5 L5 7 L10.5 7 Z&quot; fill=&quot;%23ffeb3b&quot; stroke=&quot;%23ff6f00&quot; stroke-width=&quot;1.5&quot;/></svg>'">
+        </div>
         <div class="sale-percent">
           <div class="sale-percent-num">-${activeEvent.discountPercent}<span>%</span></div>
           <div class="sale-label">SALE</div>
@@ -768,7 +770,7 @@ function renderEventBanner() {
       </div>
 
       <div class="sale-right">
-        <div class="sale-title">⚡ ${activeEvent.name}</div>
+        <div class="sale-title">${activeEvent.name}</div>
         <div class="sale-sub">Save on all miners!</div>
         <div class="sale-countdown">
           <div class="sc-box">
