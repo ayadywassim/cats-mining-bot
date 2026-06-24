@@ -332,17 +332,34 @@ bot.onText(/\/start(?:[\s_](.+))?/, async (msg, match) => {
   }
 
   const miniAppUrl = process.env.MINI_APP_URL || 'https://cats-mining.vercel.app';
-  await bot.sendMessage(chatId,
-    `🐱⛏️ *Welcome to Cats Mining!*\n\nBuy miners, earn TON daily!\nStart with a FREE Kitty miner!`,
-    {
-      parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '⛏️ Start Mining', web_app: { url: miniAppUrl } }],
-          [{ text: '📢 News', url: `https://t.me/${(process.env.NEWS_CHANNEL || '').replace('@','')}` }],
-          [{ text: '💸 Payouts', url: `https://t.me/${(process.env.PROOF_CHANNEL || '').replace('@','')}` }]
-        ]
-      }
+  const firstName = msg.from.first_name || 'Miner';
+
+  const welcomeMessage = `
+👋 *Hey ${firstName}!*
+
+Welcome to *Cats Mining* — the cutest way to earn real TON on the TON blockchain. 🐱⛏️
+
+━━━━━━━━━━━━━━━━━
+
+✨ *What awaits you:*
+🎁 Free Kitty miner on signup
+💎 9 unique miners — earn up to 250 TON
+🔥 *-10% SALE* on all miners (limited time!)
+👥 Earn 10% commission from your referrals
+🏆 Free miners as referral milestones
+
+━━━━━━━━━━━━━━━━━
+
+Tap below to start mining now 👇
+`.trim();
+
+  await bot.sendMessage(chatId, welcomeMessage, {
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '🚀 Start Mining', web_app: { url: miniAppUrl } }]
+      ]
+    }
     }
   );
 });
