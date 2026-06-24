@@ -1002,20 +1002,9 @@ async function loadReferrals() {
     document.getElementById('ref-count').textContent = d.total;
     document.getElementById('ref-commission').textContent = d.commission.toFixed(2);
 
-    // Update stats grid (valid + pending)
+    // Hide pending stats (pending system removed - all refs are valid)
     const statsBox = document.getElementById('ref-stats-extra');
-    if (statsBox) {
-      statsBox.innerHTML = `
-        <div class="ref-mini-stat valid">
-          <div class="ref-mini-val">${d.validCount||0}</div>
-          <div class="ref-mini-lbl">✓ Valid</div>
-        </div>
-        <div class="ref-mini-stat pending">
-          <div class="ref-mini-val">${d.pendingCount||0}</div>
-          <div class="ref-mini-lbl">⏳ Pending</div>
-        </div>
-      `;
-    }
+    if (statsBox) statsBox.style.display = 'none';
 
     if (d.referrals.length > 0) {
       document.getElementById('ref-list').innerHTML = d.referrals.map(ref => {
@@ -1023,10 +1012,9 @@ async function loadReferrals() {
         let badge;
         if (ref.status === 'paid') {
           badge = '<span class="ref-badge paid">💎 Paid</span>';
-        } else if (ref.status === 'valid' || ref.isValid) {
-          badge = '<span class="ref-badge valid">✓ Valid</span>';
         } else {
-          badge = '<span class="ref-badge pending">⏳ Pending</span>';
+          // All non-paid are now considered valid (pending removed)
+          badge = '<span class="ref-badge valid">✓ Active</span>';
         }
         return `<div class="task-card ref-card-item">
           <div class="task-icon purple"><svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="currentColor">${ico.svg}</svg></div>

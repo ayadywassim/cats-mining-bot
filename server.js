@@ -129,7 +129,7 @@ const User = mongoose.model('CatsMiningUser', userSchema);
 const referralLogSchema = new mongoose.Schema({
   referrerId: String,
   referredId: String,
-  status: { type: String, enum: ['pending', 'valid', 'verified', 'rejected', 'paid'], default: 'pending' },
+  status: { type: String, enum: ['valid', 'paid', 'rejected'], default: 'valid' },
   reason: String,
   commission: { type: Number, default: 0 },
   depositAmount: Number,
@@ -211,8 +211,16 @@ const depositSchema = new mongoose.Schema({
   status: { type: String, default: 'pending', enum: ['pending', 'verified', 'failed'] },
   matchMethod: String,                                               // MEMO | UNIQUE_AMOUNT | EXACT_AMOUNT | DEPOSIT_ID | BALANCE
   verifiedAt: Date,
-  createdAt: { type: Date, default: Date.now, expires: 86400 * 7 }   // auto-delete pending after 7 days
+  createdAt: { type: Date, default: Date.now }
 });
+// TTL: auto-delete PENDING deposits after 2 hours (verified deposits stay forever)
+depositSchema.index(
+  { createdAt: 1 },
+  {
+    expireAfterSeconds: 2 * 60 * 60,    // 2 hours
+    partialFilterExpression: { status: 'pending' }
+  }
+);
 const Deposit = mongoose.model('CatsMiningDeposit', depositSchema);
 
 const withdrawalSchema = new mongoose.Schema({
@@ -455,15 +463,19 @@ app.post('/api/register', strictLimiter, async (req, res) => {
           await ReferralLog.create({
             referrerId: refByStr,
             referredId: tgId,
-            status: 'pending',
-            reason: suspicious ? 'same_ip_flagged' : 'awaiting_validation'
+            status: 'valid',
+            reason: suspicious ? 'same_ip_flagged_auto_valid' : 'auto_valid_on_signup',
+            verifiedAt: new Date()
           }).catch(e => {
             // Duplicate log = referral was already created (race condition)
             if (e.code !== 11000) console.log('[REFERRAL] Log error:', e.message);
           });
 
+          // Check milestones immediately (ref is valid now)
+          try { await checkMilestones(refByStr); } catch(e) {}
+
           user = locked;  // Use updated user with referredBy
-          console.log(`[REFERRAL] ✅ Linked: ${tgId} → invited by ${refByStr}${suspicious?' [FLAGGED]':''}`);
+          console.log(`[REFERRAL] ✅ Linked + VALIDATED: ${tgId} → invited by ${refByStr}${suspicious?' [FLAGGED]':''}`);
         }
       }
     }
@@ -546,6 +558,18 @@ app.post('/api/miners/buy', strictLimiter, async (req, res) => {
     const tgId = telegramId.toString();
     const discount = await getActiveDiscount();
     const finalPrice = applyDiscount(minerConfig.price, discount);
+
+    // ─── AUTO-CLEANUP: Delete old pending deposits for this user+miner ───
+    // Prevents the user from accumulating dozens of pendings
+    // (only deletes truly old ones - over 30 minutes - to avoid breaking active payments)
+    const oldPendings = await Deposit.deleteMany({
+      telegramId: tgId,
+      status: 'pending',
+      createdAt: { $lt: new Date(Date.now() - 30 * 60 * 1000) }  // older than 30 min
+    });
+    if (oldPendings.deletedCount > 0) {
+      console.log(`[CLEANUP] Removed ${oldPendings.deletedCount} stale pending deposits for ${tgId}`);
+    }
 
     const depositId = Math.random().toString(36).substring(2, 8).toUpperCase();
     const memo = `CM${tgId}_${depositId}`;
@@ -2686,31 +2710,26 @@ app.get('/api/admin/check-duplicates', adminAuth, async (req, res) => {
 });
 
 // Clean duplicates — keeps OLDEST miner per (telegramId, minerId)
-// Validate pending referrals + create missing logs for users who claimed daily
-// Useful for fixing users stuck in 'pending' state from before this fix
+// Validate ALL pending referrals immediately + create missing logs as valid
+// Use this once to fix all old data
 app.post('/api/admin/validate-pending-refs', adminAuth, async (req, res) => {
   try {
     let validated = 0;
     let created = 0;
     const milestoneRefIds = new Set();
 
-    // 1. Fix existing 'pending' logs where user claimed daily
+    // 1. Convert ALL pending logs to valid (no conditions - pending is removed from the system)
     const pendingLogs = await ReferralLog.find({ status: 'pending' });
     for (const log of pendingLogs) {
-      const hasClaimed = await DailyClaim.findOne({ telegramId: log.referredId, taskId: 't_daily_reward' });
-      const hasLegacyDaily = await User.findOne({ telegramId: log.referredId, lastDaily: { $ne: null } });
-
-      if (hasClaimed || hasLegacyDaily) {
-        log.status = 'valid';
-        log.reason = 'claimed_daily_reward_retroactive';
-        log.verifiedAt = new Date();
-        await log.save();
-        validated++;
-        milestoneRefIds.add(log.referrerId);
-      }
+      log.status = 'valid';
+      log.reason = 'auto_validated_pending_removed';
+      log.verifiedAt = new Date();
+      await log.save();
+      validated++;
+      milestoneRefIds.add(log.referrerId);
     }
 
-    // 2. Create missing logs for users who have referredBy but no log
+    // 2. Create missing valid logs for users who have referredBy but no log
     const usersWithRefs = await User.find({ referredBy: { $ne: null } });
     for (const user of usersWithRefs) {
       const existingLog = await ReferralLog.findOne({
@@ -2719,45 +2738,87 @@ app.post('/api/admin/validate-pending-refs', adminAuth, async (req, res) => {
       });
 
       if (!existingLog) {
-        // Check if claimed daily
-        const hasClaimed = await DailyClaim.findOne({ telegramId: user.telegramId, taskId: 't_daily_reward' });
-        const hasLegacyDaily = user.lastDaily;
-        const status = (hasClaimed || hasLegacyDaily) ? 'valid' : 'pending';
-
         try {
           await ReferralLog.create({
             referrerId: user.referredBy,
             referredId: user.telegramId,
-            status,
-            reason: status === 'valid' ? 'claimed_daily_reward_retroactive' : 'created_retroactively',
-            verifiedAt: status === 'valid' ? new Date() : null
+            status: 'valid',
+            reason: 'auto_validated_on_signup_retroactive',
+            verifiedAt: new Date()
           });
           created++;
-          if (status === 'valid') {
-            milestoneRefIds.add(user.referredBy);
-            validated++;
-          }
+          validated++;
+          milestoneRefIds.add(user.referredBy);
         } catch(e) {
           // Already exists (race) - skip
         }
       }
     }
 
-    // Check milestones for affected referrers
+    // Check milestones for ALL affected referrers
     for (const refId of milestoneRefIds) {
       try { await checkMilestones(refId); } catch(e) {}
     }
 
-    await logAdmin('VALIDATE_PENDING_REFS', 'system', { validated, created }, req);
+    await logAdmin('REMOVE_PENDING_REFS', 'system', { validated, created }, req);
     res.json({
       success: true,
       validated,
       logsCreated: created,
       milestonesChecked: milestoneRefIds.size,
-      message: `Fixed ${validated} referrals · Created ${created} missing logs`
+      message: `Validated ${validated} refs (${created} were missing logs)`
     });
   } catch (error) {
     console.error('[VALIDATE-REFS]', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Cleanup OLD pending deposits (older than X hours - never matched)
+app.post('/api/admin/cleanup-pending-deposits', adminAuth, async (req, res) => {
+  try {
+    const { telegramId, hoursOld } = req.body;
+    const cutoff = new Date(Date.now() - (hoursOld || 1) * 60 * 60 * 1000);
+
+    const filter = { status: 'pending', createdAt: { $lt: cutoff } };
+    if (telegramId) filter.telegramId = telegramId.toString();
+
+    const result = await Deposit.deleteMany(filter);
+    await logAdmin('CLEANUP_PENDING_DEPOSITS', telegramId || 'all', {
+      hoursOld: hoursOld || 1,
+      deleted: result.deletedCount
+    }, req);
+
+    res.json({
+      success: true,
+      deleted: result.deletedCount,
+      message: `Deleted ${result.deletedCount} pending deposits older than ${hoursOld||1}h`
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Cleanup DUPLICATE pending deposits (keep newest only per user)
+app.post('/api/admin/cleanup-duplicate-pending', adminAuth, async (req, res) => {
+  try {
+    const users = await Deposit.distinct('telegramId', { status: 'pending' });
+    let deleted = 0;
+
+    for (const tgId of users) {
+      const pendings = await Deposit.find({ telegramId: tgId, status: 'pending' })
+        .sort({ createdAt: -1 });
+
+      if (pendings.length > 1) {
+        const toDelete = pendings.slice(1).map(p => p._id);
+        const result = await Deposit.deleteMany({ _id: { $in: toDelete } });
+        deleted += result.deletedCount;
+      }
+    }
+
+    await logAdmin('CLEANUP_DUPLICATE_PENDING', 'system', { deleted }, req);
+    res.json({ success: true, deleted, message: `Cleaned ${deleted} duplicate pendings, kept newest per user` });
+  } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
@@ -2859,4 +2920,14 @@ app.listen(PORT, () => {
   console.log(`🐱⛏️ Cats Mining running on port ${PORT}`);
   seedTasks();
   verifyDeposits();
+
+  // Auto-convert any remaining pending refs to valid (pending system removed)
+  ReferralLog.updateMany(
+    { status: 'pending' },
+    { $set: { status: 'valid', reason: 'auto_migrated_pending_removed', verifiedAt: new Date() } }
+  ).then(result => {
+    if (result.modifiedCount > 0) {
+      console.log(`[MIGRATION] ✅ Converted ${result.modifiedCount} pending refs to valid`);
+    }
+  }).catch(e => console.error('[MIGRATION]', e.message));
 });
