@@ -202,26 +202,50 @@ activeMinerSchema.index(
 const ActiveMiner = mongoose.model('CatsMiningMiner', activeMinerSchema);
 
 const depositSchema = new mongoose.Schema({
-  telegramId: String,
-  amount: Number,                                                    // Base price (e.g. 0.5)
-  uniqueAmount: Number,                                              // Exact amount with unique decimal (e.g. 0.500009)
+  telegramId: { type: String, index: true },
+  amount: Number,
+  uniqueAmount: Number,
   txHash: { type: String, unique: true, sparse: true },
   minerId: String,
-  memo: String,
-  status: { type: String, default: 'pending', enum: ['pending', 'verified', 'failed'] },
-  matchMethod: String,                                               // MEMO | UNIQUE_AMOUNT | EXACT_AMOUNT | DEPOSIT_ID | BALANCE
+  memo: { type: String, index: true },
+  status: {
+    type: String,
+    default: 'pending',
+    enum: ['pending', 'processing', 'verified', 'expired', 'failed', 'legacy']
+  },
+  matchMethod: String,
   verifiedAt: Date,
+  expiredAt: Date,
   createdAt: { type: Date, default: Date.now }
 });
-// TTL: auto-delete PENDING deposits after 2 hours (verified deposits stay forever)
+
+// Index: one PENDING deposit per (user, miner) - enforced via app logic, not unique constraint
+// (because user can have multiple verified deposits for same miner)
+depositSchema.index({ telegramId: 1, minerId: 1, status: 1 });
+
+// TTL: auto-delete PENDING/EXPIRED deposits after 48 hours
 depositSchema.index(
   { createdAt: 1 },
   {
-    expireAfterSeconds: 2 * 60 * 60,    // 2 hours
-    partialFilterExpression: { status: 'pending' }
+    expireAfterSeconds: 48 * 60 * 60,    // 48 hours
+    partialFilterExpression: { status: { $in: ['pending', 'expired'] } }
   }
 );
+
 const Deposit = mongoose.model('CatsMiningDeposit', depositSchema);
+
+// ─── PROCESSED TRANSACTIONS LEDGER ───
+// Every successful TX hash gets recorded here so it can NEVER be processed again
+const processedTxSchema = new mongoose.Schema({
+  txHash: { type: String, required: true, unique: true, index: true },
+  amount: Number,
+  memo: String,
+  telegramId: String,
+  depositId: String,
+  minerId: String,
+  processedAt: { type: Date, default: Date.now }
+});
+const ProcessedTx = mongoose.model('CatsMiningProcessedTx', processedTxSchema);
 
 const withdrawalSchema = new mongoose.Schema({
   telegramId: String,
@@ -317,25 +341,58 @@ bot.onText(/\/start(?:[\s_](.+))?/, async (msg, match) => {
     });
 
     if (refParam && refParam.startsWith('ref_')) {
-      const referrerId = refParam.replace('ref_', '');
-      if (referrerId !== tgId) {
-        user.referredBy = referrerId;
+      const referrerId = refParam.replace('ref_', '').trim();
+      // Validate referrer exists + not self + not banned
+      if (referrerId && referrerId !== tgId) {
+        const referrer = await User.findOne({ telegramId: referrerId });
+        if (referrer && !referrer.banned && !referrer.referrals.includes(tgId)) {
+          user.referredBy = referrerId;
+          user.referralLocked = true;
+          await User.findOneAndUpdate(
+            { telegramId: referrerId },
+            { $addToSet: { referrals: tgId } }
+          );
+          // Create ReferralLog as valid (no pending system anymore)
+          await ReferralLog.create({
+            referrerId,
+            referredId: tgId,
+            status: 'valid',
+            reason: 'bot_start_command',
+            verifiedAt: new Date()
+          }).catch(() => {});  // ignore duplicate
+        }
+      }
+    }
+    try {
+      await user.save();
+    } catch(e) {
+      // Race condition: another concurrent /start created the user
+      if (e.code === 11000) {
+        user = await User.findOne({ telegramId: tgId });
+      } else throw e;
+    }
+  } else if (!user.referredBy && !user.referralLocked && refParam && refParam.startsWith('ref_')) {
+    // Late referral credit (user existed but never got a referrer)
+    const referrerId = refParam.replace('ref_', '').trim();
+    if (referrerId && referrerId !== tgId) {
+      const referrer = await User.findOne({ telegramId: referrerId });
+      if (referrer && !referrer.banned && !referrer.referrals.includes(tgId)) {
+        await User.findOneAndUpdate(
+          { telegramId: tgId, referralLocked: { $ne: true }, referredBy: null },
+          { $set: { referredBy: referrerId, referralLocked: true } }
+        );
         await User.findOneAndUpdate(
           { telegramId: referrerId },
           { $addToSet: { referrals: tgId } }
         );
+        await ReferralLog.create({
+          referrerId,
+          referredId: tgId,
+          status: 'valid',
+          reason: 'late_credit_bot_start',
+          verifiedAt: new Date()
+        }).catch(() => {});
       }
-    }
-    await user.save();
-  } else if (!user.referredBy && refParam && refParam.startsWith('ref_')) {
-    const referrerId = refParam.replace('ref_', '');
-    if (referrerId !== tgId) {
-      user.referredBy = referrerId;
-      await user.save();
-      await User.findOneAndUpdate(
-        { telegramId: referrerId },
-        { $addToSet: { referrals: tgId } }
-      );
     }
   }
 
@@ -368,8 +425,7 @@ Tap below to start mining now 👇
         [{ text: '🚀 Start Mining', web_app: { url: miniAppUrl } }]
       ]
     }
-    }
-  );
+  });
 });
 
 // ============ API: REGISTER ============
@@ -559,18 +615,48 @@ app.post('/api/miners/buy', strictLimiter, async (req, res) => {
     const discount = await getActiveDiscount();
     const finalPrice = applyDiscount(minerConfig.price, discount);
 
-    // ─── AUTO-CLEANUP: Delete old pending deposits for this user+miner ───
-    // Prevents the user from accumulating dozens of pendings
-    // (only deletes truly old ones - over 30 minutes - to avoid breaking active payments)
-    const oldPendings = await Deposit.deleteMany({
+    // ─── EXPIRE old pending deposits (older than 48h) ───
+    await Deposit.updateMany(
+      {
+        telegramId: tgId,
+        status: 'pending',
+        createdAt: { $lt: new Date(Date.now() - 48 * 60 * 60 * 1000) }
+      },
+      { $set: { status: 'expired', expiredAt: new Date() } }
+    );
+
+    // ─── ONE PENDING DEPOSIT RULE ───
+    // If user already has a recent pending deposit for this miner, return it
+    const existing = await Deposit.findOne({
       telegramId: tgId,
+      minerId: minerConfig.id,
       status: 'pending',
-      createdAt: { $lt: new Date(Date.now() - 30 * 60 * 1000) }  // older than 30 min
+      createdAt: { $gte: new Date(Date.now() - 30 * 60 * 1000) }   // within last 30 min
     });
-    if (oldPendings.deletedCount > 0) {
-      console.log(`[CLEANUP] Removed ${oldPendings.deletedCount} stale pending deposits for ${tgId}`);
+
+    if (existing) {
+      console.log(`[PAYMENT] Reusing existing pending deposit ${existing._id} for ${tgId}`);
+      return res.json({
+        success: true,
+        type: 'deposit_required',
+        walletAddress: process.env.BOT_WALLET,
+        amount: existing.uniqueAmount || existing.amount,
+        originalPrice: minerConfig.price,
+        discount,
+        uniqueAmount: existing.uniqueAmount || existing.amount,
+        memo: existing.memo,
+        depositId: existing._id.toString(),
+        reused: true
+      });
     }
 
+    // Clean up older pendings for this miner (mark as expired)
+    await Deposit.updateMany(
+      { telegramId: tgId, minerId: minerConfig.id, status: 'pending' },
+      { $set: { status: 'expired', expiredAt: new Date() } }
+    );
+
+    // Create new deposit with unique memo
     const depositId = Math.random().toString(36).substring(2, 8).toUpperCase();
     const memo = `CM${tgId}_${depositId}`;
 
@@ -583,7 +669,7 @@ app.post('/api/miners/buy', strictLimiter, async (req, res) => {
     });
     await deposit.save();
 
-    console.log(`[PAYMENT] Created deposit: user=${tgId} miner=${minerConfig.id} amount=${finalPrice} (orig=${minerConfig.price}, discount=${discount}%) memo=${memo}`);
+    console.log(`[PAYMENT] Created deposit: id=${deposit._id} user=${tgId} miner=${minerConfig.id} amount=${finalPrice} memo=${memo}`);
 
     res.json({
       success: true,
@@ -659,16 +745,18 @@ app.post('/api/miners/buy-balance', criticalLimiter, async (req, res) => {
         fromDepositId: deposit._id.toString()
       });
     } catch(err) {
+      // CRITICAL: Refund balance + delete deposit on ANY failure
+      console.error('[BUY-BALANCE] ❌ Miner creation failed, refunding:', err.message);
+      await User.findOneAndUpdate(
+        { telegramId: tgId },
+        { $inc: { balance: finalPrice, totalInvested: -finalPrice } }
+      );
+      await Deposit.deleteOne({ _id: deposit._id });
+
       if (err.code === 11000) {
-        // Duplicate fromDepositId — race condition, refund
-        await User.findOneAndUpdate(
-          { telegramId: tgId },
-          { $inc: { balance: finalPrice, totalInvested: -finalPrice } }
-        );
-        await Deposit.deleteOne({ _id: deposit._id });
         return res.status(429).json({ error: 'DUPLICATE_REQUEST', message: 'Already processing' });
       }
-      throw err;
+      return res.status(500).json({ error: 'MINER_CREATE_FAILED', message: 'Balance refunded' });
     }
 
     console.log(`[MINER] ${tgId} bought ${minerConfig.name} with balance (${finalPrice} TON, discount=${discount}%)`);
@@ -681,14 +769,14 @@ app.post('/api/miners/buy-balance', criticalLimiter, async (req, res) => {
         status: 'paid'
       });
       if (!existingLog) {
-        const commission = minerConfig.price * 0.10;
+        const commission = finalPrice * 0.10;   // 10% of ACTUAL paid amount
         await User.findOneAndUpdate(
           { telegramId: updated.referredBy },
           { $inc: { balance: commission, refCommission: commission, totalEarned: commission } }
         );
         await ReferralLog.findOneAndUpdate(
           { referrerId: updated.referredBy, referredId: tgId },
-          { status: 'paid', commission, depositAmount: minerConfig.price, verifiedAt: new Date() },
+          { status: 'paid', commission, depositAmount: finalPrice, verifiedAt: new Date() },
           { upsert: true }
         );
         console.log(`[REFERRAL] +${commission} TON to ${updated.referredBy} (balance buy)`);
@@ -868,13 +956,28 @@ app.post('/api/withdrawals/request', criticalLimiter, async (req, res) => {
     );
     if (!updated) return res.status(400).json({ error: 'INSUFFICIENT' });
 
-    // Create withdrawal record
-    const withdrawal = new Withdrawal({
-      telegramId: tgId, amount: amt, fee, netAmount, walletAddress: wallet, status: 'pending'
-    });
-    await withdrawal.save();
+    // Create withdrawal record — IF FAILS, refund the user
+    let withdrawal;
+    try {
+      withdrawal = await Withdrawal.create({
+        telegramId: tgId,
+        amount: amt,
+        fee,
+        netAmount,
+        walletAddress: wallet,
+        status: 'pending'
+      });
+    } catch(saveErr) {
+      // ROLLBACK: refund balance since record wasn't created
+      console.error('[WITHDRAW] ❌ Save failed, rolling back:', saveErr.message);
+      await User.findOneAndUpdate(
+        { telegramId: tgId },
+        { $inc: { balance: amt } }
+      );
+      return res.status(500).json({ error: 'WITHDRAW_CREATE_FAILED', message: 'Could not create withdrawal, balance refunded' });
+    }
 
-    console.log(`[WITHDRAW] User ${tgId} requested ${amt} TON to ${wallet.slice(0,10)}...`);
+    console.log(`[WITHDRAW] ✅ User ${tgId} requested ${amt} TON to ${wallet.slice(0,10)}... (id=${withdrawal._id})`);
 
     // Notify admin
     const adminId = process.env.ADMIN_IDS;
@@ -1102,7 +1205,7 @@ app.post('/api/tasks/complete', strictLimiter, async (req, res) => {
       // Check if claimed in last 24h
       const last = await DailyClaim.findOne({
         telegramId: tgId,
-        safeTaskId,
+        taskId: safeTaskId,    // FIX: was using variable name as field name
         claimedAt: { $gte: new Date(Date.now() - 24*60*60*1000) }
       });
       if (last) {
@@ -1237,14 +1340,44 @@ app.post('/api/tasks/complete', strictLimiter, async (req, res) => {
     }
 
     if (task.isDaily) {
-      // Daily task: record claim, no completedTasks push (can repeat)
-      await DailyClaim.create({ telegramId: tgId, taskId: safeTaskId });
+      // Daily task: ATOMIC race-safe claim
+      // First insert the DailyClaim record (acts as a lock)
+      // If another concurrent request beat us, the User update will only apply once
+      // due to checkIdemp + this check
+      let claimRecord;
+      try {
+        claimRecord = await DailyClaim.create({ telegramId: tgId, taskId: safeTaskId });
+      } catch(e) {
+        console.error('[TASK-DAILY] Claim record failed:', e.message);
+        return res.status(500).json({ error: 'CLAIM_FAILED' });
+      }
+
+      // Double-check: ensure no other DailyClaim exists in last 24h with earlier timestamp
+      // (defense-in-depth against extremely rare race conditions)
+      const competing = await DailyClaim.findOne({
+        telegramId: tgId,
+        taskId: safeTaskId,
+        claimedAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+        _id: { $ne: claimRecord._id }
+      });
+      if (competing) {
+        // We lost the race - delete our record and bail
+        await DailyClaim.deleteOne({ _id: claimRecord._id });
+        return res.status(400).json({ error: 'ALREADY_CLAIMED', message: 'Already claimed in last 24h' });
+      }
+
+      // Now safely give reward
       const updated = await User.findOneAndUpdate(
-        { telegramId: tgId },
+        { telegramId: tgId, banned: false },
         { $inc: { balance: finalReward, totalEarned: finalReward } },
         { new: true }
       );
-      console.log(`[TASK-DAILY] ✅ ${tgId} claimed ${taskId} +${finalReward} TON`);
+      if (!updated) {
+        // User banned or not found - rollback claim
+        await DailyClaim.deleteOne({ _id: claimRecord._id });
+        return res.status(403).json({ error: 'USER_INVALID' });
+      }
+      console.log(`[TASK-DAILY] ✅ ${tgId} claimed ${safeTaskId} +${finalReward} TON`);
 
       // ─── REFERRAL ACTIVATION (ROBUST) ───
       // If user has a referrer AND this is daily reward → validate referral (or create if missing)
@@ -1530,9 +1663,22 @@ async function checkMilestones(telegramId) {
       const minerConfig = MINERS_CONFIG.find(m => m.id === ms.minerId);
       if (!minerConfig) continue;
 
+      // ─── ATOMIC: First create the claim (acts as the unique lock) ───
+      let claimRecord;
       try {
-        await MilestoneClaim.create({ telegramId: tgId, milestoneId: ms.id, minerId: ms.minerId });
+        claimRecord = await MilestoneClaim.create({
+          telegramId: tgId,
+          milestoneId: ms.id,
+          minerId: ms.minerId
+        });
+      } catch(e) {
+        // Already claimed (unique index)
+        console.log(`[MILESTONE] ⏭️ ${tgId} already claimed ${ms.id}`);
+        continue;
+      }
 
+      // Now create the miner - if fails, rollback the claim
+      try {
         const activateAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
         await ActiveMiner.create({
           telegramId: tgId,
@@ -1554,8 +1700,10 @@ async function checkMilestones(telegramId) {
             { parse_mode: 'Markdown' }
           );
         } catch(e) {}
-      } catch(e) {
-        console.log(`[MILESTONE] ⏭️ ${tgId} already claimed ${ms.id}`);
+      } catch(minerErr) {
+        // Rollback: delete the claim so user can retry
+        console.error(`[MILESTONE] ❌ Miner creation failed, rolling back claim:`, minerErr.message);
+        await MilestoneClaim.deleteOne({ _id: claimRecord._id });
       }
     }
   } catch(error) {
@@ -1563,8 +1711,16 @@ async function checkMilestones(telegramId) {
   }
 }
 
+let verifyDepositsRunning = false;
 async function verifyDeposits() {
+  // Prevent concurrent runs (in case previous took >2min)
+  if (verifyDepositsRunning) {
+    console.log('[VERIFY] ⏭️ Skipping - previous run still active');
+    return;
+  }
+  verifyDepositsRunning = true;
   try {
+    // Get only pending deposits (NOT processing/verified)
     const pending = await Deposit.find({ status: 'pending' });
     if (!pending.length) return;
 
@@ -1602,24 +1758,22 @@ async function verifyDeposits() {
     for (const tx of txData) {
       const inMsg = tx.in_msg;
       if (!inMsg || !inMsg.value) continue;
-      if (parseInt(inMsg.value) === 0) continue;  // skip outgoing
+      if (parseInt(inMsg.value) === 0) continue;
 
       const amountNano = parseInt(inMsg.value);
       const amountTON = amountNano / 1e9;
-      if (amountTON < 0.05) continue;  // skip dust
+      if (amountTON < 0.05) continue;
 
       const txHash = tx.transaction_id?.hash || '';
       const fromAddr = inMsg.source || 'unknown';
 
-      // Parse memo from in_msg.message OR msg_data.text
+      // Parse memo
       let memo = '';
       if (inMsg.message) {
         memo = inMsg.message.trim();
       } else if (inMsg.msg_data && inMsg.msg_data.text) {
-        // Decode base64 if needed
         try {
           memo = Buffer.from(inMsg.msg_data.text, 'base64').toString('utf-8');
-          // Remove 4-byte op code prefix if present (0x00000000 for plain text comment)
           if (memo.charCodeAt(0) === 0) memo = memo.substring(4);
           memo = memo.replace(/\0/g, '').trim();
         } catch(e) {}
@@ -1631,150 +1785,160 @@ async function verifyDeposits() {
       console.log(`[TX] From: ${fromAddr.slice(0,8)}...${fromAddr.slice(-6)}`);
       console.log(`[TX] Hash: ${txHash.slice(0,12)}...`);
 
-      // Skip if already processed
-      const txProcessed = await Deposit.findOne({ txHash, status: 'verified' });
-      if (txProcessed) {
-        console.log(`[TX] ⏭️ Already processed`);
+      // ═══════════════════════════════════════════════════
+      // 🔒 LAYER 1: TX HASH LEDGER CHECK
+      // If this txHash was EVER processed, skip forever
+      // ═══════════════════════════════════════════════════
+      if (!txHash) {
+        console.log(`[TXHASH] ⚠️ No txHash, skipping`);
         continue;
       }
 
+      const alreadyProcessed = await ProcessedTx.findOne({ txHash });
+      if (alreadyProcessed) {
+        console.log(`[TXHASH] ⏭️ Already processed (deposit=${alreadyProcessed.depositId})`);
+        continue;
+      }
+
+      // ═══════════════════════════════════════════════════
+      // 🎯 MATCHING LOGIC — STRICT
+      // PRIORITY 1: MEMO match (exact)
+      // PRIORITY 2: UNIQUE_AMOUNT match (within 0.0001 TON)
+      // PRIORITY 3: NO fuzzy/EXACT_AMOUNT match (security risk)
+      // ═══════════════════════════════════════════════════
       let matchedDep = null;
       let matchMethod = '';
 
-      // ╔══════════════════════════════════════════════╗
-      // ║  MATCHING PRIORITY                            ║
-      // ║  1. MEMO match (most reliable)                ║
-      // ║  2. UNIQUE_AMOUNT match (TON Connect)         ║
-      // ║  3. EXACT_AMOUNT match (fallback)             ║
-      // ╚══════════════════════════════════════════════╝
-
-      // ─── PRIORITY 1: MEMO MATCH ───
-      if (memo && memo.length > 2) {
+      // ─── PRIORITY 1: MEMO MATCH (CM<userId>_<id>) ───
+      if (memo && memo.length >= 3 && memo.startsWith('CM')) {
         for (const dep of pending) {
           if (!dep.memo) continue;
-          // Match if memo contains the deposit memo string
-          if (memo.includes(dep.memo) || memo.includes(dep.memo.replace('_', ''))) {
-            // Verify amount is at least 90% of expected
-            if (amountTON >= dep.amount * 0.90) {
+          // EXACT match required
+          if (memo === dep.memo) {
+            // Verify amount within tolerance (max 5% off)
+            const expectedAmount = dep.uniqueAmount || dep.amount;
+            const tolerance = expectedAmount * 0.05;
+            if (Math.abs(amountTON - expectedAmount) <= tolerance) {
               matchedDep = dep;
               matchMethod = 'MEMO';
-              console.log(`[MATCH] ✅ MEMO match: deposit ${dep._id}`);
+              console.log(`[MATCH] ✅ MEMO exact match: deposit=${dep._id}`);
               break;
             } else {
-              console.log(`[MATCH] ⚠️ MEMO matched but amount too low: ${amountTON} < ${dep.amount}`);
+              console.log(`[MATCH] ⚠️ MEMO matches but amount off: ${amountTON} vs expected ${expectedAmount}`);
             }
           }
         }
       }
 
-      // ─── PRIORITY 2: UNIQUE AMOUNT MATCH ───
+      // ─── PRIORITY 2: UNIQUE_AMOUNT (precise within 0.0001 TON) ───
+      // Only if unique enough among pendings (no ambiguity)
       if (!matchedDep) {
-        for (const dep of pending) {
-          if (!dep.uniqueAmount) continue;
-          const diff = Math.abs(amountTON - dep.uniqueAmount);
-          if (diff < 0.0001) {  // within 0.0001 TON
-            matchedDep = dep;
-            matchMethod = 'UNIQUE_AMOUNT';
-            console.log(`[MATCH] ✅ UNIQUE_AMOUNT match: ${amountTON} ≈ ${dep.uniqueAmount}`);
-            break;
-          }
+        const candidates = pending.filter(d => {
+          if (!d.uniqueAmount) return false;
+          return Math.abs(amountTON - d.uniqueAmount) < 0.0001;
+        });
+        if (candidates.length === 1) {
+          matchedDep = candidates[0];
+          matchMethod = 'UNIQUE_AMOUNT';
+          console.log(`[MATCH] ✅ UNIQUE_AMOUNT match: ${amountTON} ≈ ${matchedDep.uniqueAmount}`);
+        } else if (candidates.length > 1) {
+          console.log(`[MATCH] ⚠️ ${candidates.length} candidates with unique amount ${amountTON} - REJECT (memo required)`);
         }
       }
 
-      // ─── PRIORITY 3: EXACT AMOUNT MATCH (most recent first) ───
-      // Only works if no race condition (one pending per amount)
-      if (!matchedDep) {
-        // Group pending by amount — only match if unique
-        const sorted = [...pending].sort((a, b) => b.createdAt - a.createdAt);
-        for (const dep of sorted) {
-          if (amountTON >= dep.amount * 0.99 && amountTON <= dep.amount * 1.05) {
-            // Check: is this the only pending with this amount?
-            const sameAmount = pending.filter(p => 
-              p.amount === dep.amount && p._id.toString() !== dep._id.toString()
-            );
-            if (sameAmount.length === 0) {
-              matchedDep = dep;
-              matchMethod = 'EXACT_AMOUNT';
-              console.log(`[MATCH] ✅ EXACT_AMOUNT match: ${amountTON} ≈ ${dep.amount}`);
-              break;
-            } else {
-              console.log(`[MATCH] ⚠️ Amount ${dep.amount} matches multiple deposits - requires memo`);
-            }
-          }
-        }
-      }
-
+      // NO FALLBACK — if no exact match, deposit is rejected
       if (!matchedDep) {
         console.log(`[MATCH] ❌ NO MATCH for ${amountTON} TON, memo="${memo}"`);
-        console.log(`[MATCH] Pending deposits:`);
-        for (const dep of pending) {
-          console.log(`[MATCH]   - user=${dep.telegramId} amount=${dep.amount} unique=${dep.uniqueAmount} memo=${dep.memo}`);
-        }
         continue;
       }
 
-      // ─── VERIFY THE DEPOSIT (ATOMIC LOCK) ───
+      // ═══════════════════════════════════════════════════
+      // 🔒 LAYER 2: DEPOSIT LOCKING (pending → processing)
+      // Atomic transition - only ONE process can lock this deposit
+      // ═══════════════════════════════════════════════════
+      const locked = await Deposit.findOneAndUpdate(
+        { _id: matchedDep._id, status: 'pending' },
+        {
+          $set: {
+            status: 'processing',
+            txHash,
+            matchMethod
+          }
+        },
+        { new: true }
+      );
+
+      if (!locked) {
+        console.log(`[VERIFY] ⏭️ Deposit ${matchedDep._id} already locked by another process`);
+        continue;
+      }
+
+      console.log(`[VERIFY] 🔒 Locked deposit ${locked._id} → processing`);
+
+      // ═══════════════════════════════════════════════════
+      // 🔒 LAYER 3: TX HASH LEDGER WRITE (atomic insert)
+      // If insert fails (duplicate key), this TX is already taken → rollback
+      // ═══════════════════════════════════════════════════
       try {
-        // ATOMIC: only verify if still pending (locks the deposit)
-        // If another process already verified, this returns null → skip
-        const locked = await Deposit.findOneAndUpdate(
-          { _id: matchedDep._id, status: 'pending' },
-          {
-            $set: {
-              status: 'verified',
-              txHash,
-              matchMethod,
-              verifiedAt: new Date()
-            }
-          },
-          { new: true }
-        );
-
-        if (!locked) {
-          console.log(`[VERIFY] ⚠️ Deposit ${matchedDep._id} already verified by another process, skipping`);
-          continue;
-        }
-
-        // Also check if this txHash was already used (extra safety)
-        const txDupCheck = await Deposit.countDocuments({ txHash, status: 'verified' });
-        if (txDupCheck > 1) {
-          // This txHash is already linked to another verified deposit → rollback
-          await Deposit.findOneAndUpdate(
-            { _id: locked._id },
-            { $set: { status: 'pending', txHash: null, verifiedAt: null } }
-          );
-          console.log(`[VERIFY] ⚠️ txHash ${txHash} already used elsewhere, rolled back`);
-          continue;
-        }
-
-        matchedDep.status = 'verified';
-        matchedDep.txHash = txHash;
-        matchedDep.matchMethod = matchMethod;
-        matchedDep.verifiedAt = new Date();
-
-        console.log(`[VERIFY] ✅ Deposit verified: user=${matchedDep.telegramId} method=${matchMethod}`);
-
-        // Activate miner
-        const minerConfig = MINERS_CONFIG.find(m => m.id === matchedDep.minerId);
-        if (!minerConfig) {
-          console.log(`[MINER] ❌ Miner config not found: ${matchedDep.minerId}`);
-          continue;
-        }
-
-        // ATOMIC: ensure no duplicate miner from same deposit
-        // Use deposit _id as link to prevent duplicate activation
-        const existingMinerFromDeposit = await ActiveMiner.findOne({
-          telegramId: matchedDep.telegramId,
-          fromDepositId: matchedDep._id.toString()
+        await ProcessedTx.create({
+          txHash,
+          amount: amountTON,
+          memo,
+          telegramId: locked.telegramId,
+          depositId: locked._id.toString(),
+          minerId: locked.minerId
         });
-        if (existingMinerFromDeposit) {
-          console.log(`[MINER] ⚠️ Already activated from deposit ${matchedDep._id}, skipping`);
+        console.log(`[TXHASH] ✅ Ledger insert: ${txHash.slice(0,12)}...`);
+      } catch(err) {
+        if (err.code === 11000) {
+          // TxHash already in ledger → another process beat us
+          console.log(`[TXHASH] ⏭️ Ledger duplicate, rolling back deposit ${locked._id}`);
+          await Deposit.findOneAndUpdate(
+            { _id: locked._id, status: 'processing' },
+            { $set: { status: 'pending', txHash: null, matchMethod: null } }
+          );
           continue;
         }
+        // Other error - rollback and skip
+        console.error(`[TXHASH] ❌ Insert failed:`, err.message);
+        await Deposit.findOneAndUpdate(
+          { _id: locked._id, status: 'processing' },
+          { $set: { status: 'pending', txHash: null, matchMethod: null } }
+        );
+        continue;
+      }
 
+      // ═══════════════════════════════════════════════════
+      // 🎯 LAYER 4: ACTIVATE MINER (atomic, linked to deposit)
+      // ═══════════════════════════════════════════════════
+      const minerConfig = MINERS_CONFIG.find(m => m.id === locked.minerId);
+      if (!minerConfig) {
+        console.log(`[ACTIVATE] ❌ Unknown miner config: ${locked.minerId}`);
+        // Mark deposit as verified anyway (TX is real, just bad config)
+        await Deposit.findOneAndUpdate(
+          { _id: locked._id },
+          { $set: { status: 'verified', verifiedAt: new Date() } }
+        );
+        continue;
+      }
+
+      // Check if miner already activated from this specific deposit
+      const existingMiner = await ActiveMiner.findOne({
+        fromDepositId: locked._id.toString()
+      });
+      if (existingMiner) {
+        console.log(`[ACTIVATE] ⏭️ Miner already activated from this deposit`);
+        await Deposit.findOneAndUpdate(
+          { _id: locked._id },
+          { $set: { status: 'verified', verifiedAt: new Date() } }
+        );
+        continue;
+      }
+
+      try {
         const activateAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-        const miner = new ActiveMiner({
-          telegramId: matchedDep.telegramId,
+        const miner = await ActiveMiner.create({
+          telegramId: locked.telegramId,
           minerId: minerConfig.id,
           minerName: minerConfig.name,
           level: minerConfig.level,
@@ -1783,59 +1947,91 @@ async function verifyDeposits() {
           totalReturn: minerConfig.total,
           startsEarningAt: activateAt,
           expiresAt: new Date(activateAt.getTime() + minerConfig.days * 24 * 60 * 60 * 1000),
-          fromDepositId: matchedDep._id.toString()  // Link miner to deposit
+          fromDepositId: locked._id.toString()
         });
-        await miner.save();
 
-        console.log(`[MINER] ✅ Activated ${minerConfig.name} for ${matchedDep.telegramId}`);
+        console.log(`[ACTIVATE] ✅ Miner ${minerConfig.name} (Lv.${minerConfig.level}) created for ${locked.telegramId}`);
 
-        // Update user stats
+        // Update user's total deposited
         await User.findOneAndUpdate(
-          { telegramId: matchedDep.telegramId },
-          { $inc: { totalDeposited: amountTON, totalInvested: amountTON } }
+          { telegramId: locked.telegramId },
+          { $inc: { totalDeposited: locked.amount } }
         );
 
-        // Referral commission — prevent duplicate via audit log
-        const user = await User.findOne({ telegramId: matchedDep.telegramId });
+        // ═══════════════════════════════════════════════════
+        // 🎁 LAYER 5: REFERRAL COMMISSION (one-time)
+        // ═══════════════════════════════════════════════════
+        const user = await User.findOne({ telegramId: locked.telegramId });
         if (user && user.referredBy) {
-          const existingLog = await ReferralLog.findOne({
+          // Check if this specific deposit already paid commission
+          const alreadyPaid = await ReferralLog.findOne({
             referrerId: user.referredBy,
-            referredId: matchedDep.telegramId,
+            referredId: locked.telegramId,
             status: 'paid'
           });
-          if (!existingLog) {
-            const commission = amountTON * 0.10;
+
+          if (!alreadyPaid) {
+            const commission = locked.amount * 0.10;
             await User.findOneAndUpdate(
               { telegramId: user.referredBy },
               { $inc: { balance: commission, refCommission: commission, totalEarned: commission } }
             );
+
             await ReferralLog.findOneAndUpdate(
-              { referrerId: user.referredBy, referredId: matchedDep.telegramId },
-              { status: 'paid', commission, depositAmount: amountTON, verifiedAt: new Date() },
+              { referrerId: user.referredBy, referredId: locked.telegramId },
+              {
+                $set: {
+                  status: 'paid',
+                  commission,
+                  depositAmount: locked.amount,
+                  verifiedAt: new Date()
+                }
+              },
               { upsert: true }
             );
-            console.log(`[REFERRAL] +${commission.toFixed(4)} TON to ${user.referredBy} (verified deposit)`);
 
-            // Check milestones for referrer
-            await checkMilestones(user.referredBy);
+            console.log(`[REFERRAL] ✅ +${commission.toFixed(4)} TON to ${user.referredBy}`);
+
+            // Check milestones
+            try { await checkMilestones(user.referredBy); } catch(e) {}
           } else {
-            console.log(`[REFERRAL] ⏭️ Already paid for ${matchedDep.telegramId}`);
+            console.log(`[REFERRAL] ⏭️ Commission already paid`);
           }
         }
 
-        // Notify user via bot
+        // ═══════════════════════════════════════════════════
+        // ✅ FINAL: Mark deposit as VERIFIED
+        // ═══════════════════════════════════════════════════
+        await Deposit.findOneAndUpdate(
+          { _id: locked._id },
+          { $set: { status: 'verified', verifiedAt: new Date() } }
+        );
+
+        // Notify user
         try {
-          await bot.sendMessage(matchedDep.telegramId,
-            `✅ *Payment Verified!*\n\n⛏️ ${minerConfig.name} (Lv.${minerConfig.level})\n💰 Daily: ${minerConfig.daily} TON\n⏳ Starts earning in 24h\n📅 Contract: ${minerConfig.days} days\n💎 Total return: ${minerConfig.total} TON\n\n_Match: ${matchMethod}_`,
+          await bot.sendMessage(locked.telegramId,
+            `✅ *Payment Verified!*\n\n⛏️ ${minerConfig.name} (Lv.${minerConfig.level})\n💰 Daily: ${minerConfig.daily} TON\n⏳ Starts earning in 24h\n📅 Contract: ${minerConfig.days} days\n💎 Total return: ${minerConfig.total} TON`,
             { parse_mode: 'Markdown' }
           );
         } catch(e) { console.log('[BOT] Notify failed:', e.message); }
-      } catch (e) {
-        console.log(`[VERIFY] ❌ Failed to save: ${e.message}`);
-        // Reset to pending if save fails
-        if (matchedDep) {
-          matchedDep.status = 'pending';
-          await matchedDep.save().catch(()=>{});
+
+      } catch(activateErr) {
+        if (activateErr.code === 11000) {
+          // Duplicate fromDepositId - another process activated
+          console.log(`[ACTIVATE] ⏭️ Race: miner already created from this deposit`);
+          await Deposit.findOneAndUpdate(
+            { _id: locked._id },
+            { $set: { status: 'verified', verifiedAt: new Date() } }
+          );
+        } else {
+          console.error(`[ACTIVATE] ❌ Failed:`, activateErr.message);
+          // Reset deposit to pending so it can retry
+          await Deposit.findOneAndUpdate(
+            { _id: locked._id, status: 'processing' },
+            { $set: { status: 'pending' } }
+          );
+          // Also remove the ledger entry so it can be retried
+          await ProcessedTx.deleteOne({ txHash });
         }
       }
     }
@@ -1843,9 +2039,10 @@ async function verifyDeposits() {
     console.log(`[VERIFY] ════════ Verification complete ════════\n`);
   } catch (error) {
     console.error('[VERIFY] ❌ Fatal error:', error.message);
+  } finally {
+    verifyDepositsRunning = false;  // ALWAYS release the lock
   }
 }
-
 
 // ============ EXPIRE MINERS (CRON) ============
 async function expireMiners() {
@@ -2287,19 +2484,38 @@ app.post('/api/admin/tasks/delete', adminAuth, async (req, res) => {
 app.post('/api/admin/approve-withdrawal', adminAuth, async (req, res) => {
   try {
     const { withdrawalId, txHash } = req.body;
-    const wd = await Withdrawal.findById(withdrawalId);
-    if (!wd) return res.status(404).json({ error: 'NOT_FOUND' });
-    if (wd.status !== 'pending') return res.status(400).json({ error: 'ALREADY_PROCESSED' });
-    wd.status = 'approved';
-    wd.txHash = txHash || 'manual';
-    await wd.save();
+    if (!withdrawalId) return res.status(400).json({ error: 'INVALID' });
+
+    const safeTxHash = txHash ? sanitize(String(txHash)).slice(0, 200) : 'manual';
+
+    // ATOMIC: only approve if still pending — prevents double-approval
+    const wd = await Withdrawal.findOneAndUpdate(
+      { _id: withdrawalId, status: 'pending' },
+      { $set: { status: 'approved', txHash: safeTxHash, approvedAt: new Date() } },
+      { new: true }
+    );
+
+    if (!wd) {
+      const exists = await Withdrawal.findById(withdrawalId);
+      if (!exists) return res.status(404).json({ error: 'NOT_FOUND' });
+      return res.status(400).json({ error: 'ALREADY_PROCESSED', currentStatus: exists.status });
+    }
+
+    // Update totalWithdrawn
     await User.findOneAndUpdate(
       { telegramId: wd.telegramId },
       { $inc: { totalWithdrawn: wd.netAmount } }
     );
-    await logAdmin('APPROVE_WITHDRAWAL', wd.telegramId, { withdrawalId, amount: wd.amount, netAmount: wd.netAmount, txHash }, req);
+
+    await logAdmin('APPROVE_WITHDRAWAL', wd.telegramId, {
+      withdrawalId, amount: wd.amount, netAmount: wd.netAmount, txHash: safeTxHash
+    }, req);
+
     try {
-      await bot.sendMessage(wd.telegramId, `✅ Withdrawal approved!\n\n💰 Amount: ${wd.netAmount} TON\n📍 To: \`${wd.walletAddress}\`\n🔗 TX: ${txHash || 'manual'}`, { parse_mode: 'Markdown' });
+      await bot.sendMessage(wd.telegramId,
+        `✅ Withdrawal approved!\n\n💰 Amount: ${wd.netAmount} TON\n📍 To: \`${wd.walletAddress}\`\n🔗 TX: ${safeTxHash}`,
+        { parse_mode: 'Markdown' }
+      );
     } catch(e) { console.error('[WITHDRAW] User notify failed:', e.message); }
 
     // ─── POST PROOF TO PAYOUT CHANNEL ───
@@ -2307,8 +2523,8 @@ app.post('/api/admin/approve-withdrawal', adminAuth, async (req, res) => {
     if (proofChannel) {
       try {
         const masked = '****' + wd.telegramId.slice(-4);
-        const txLink = txHash && txHash !== 'manual'
-          ? `\n🔗 [View Transaction](https://tonviewer.com/transaction/${txHash})`
+        const txLink = safeTxHash && safeTxHash !== 'manual'
+          ? `\n🔗 [View Transaction](https://tonviewer.com/transaction/${safeTxHash})`
           : '';
 
         const proofMessage =
@@ -2322,9 +2538,7 @@ app.post('/api/admin/approve-withdrawal', adminAuth, async (req, res) => {
           parse_mode: 'Markdown',
           disable_web_page_preview: false,
           reply_markup: {
-            inline_keyboard: [
-              [{ text: '🚀 Start Mining', url: 'https://t.me/MiningCatsBot' }]
-            ]
+            inline_keyboard: [[{ text: '🚀 Start Mining', url: 'https://t.me/MiningCatsBot' }]]
           }
         });
         console.log(`[PROOF] ✅ Posted to ${proofChannel} for ${wd.telegramId}`);
@@ -2338,6 +2552,7 @@ app.post('/api/admin/approve-withdrawal', adminAuth, async (req, res) => {
 
     res.json({ success: true });
   } catch (error) {
+    console.error('[APPROVE]', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -2345,22 +2560,50 @@ app.post('/api/admin/approve-withdrawal', adminAuth, async (req, res) => {
 app.post('/api/admin/reject-withdrawal', adminAuth, async (req, res) => {
   try {
     const { withdrawalId } = req.body;
-    const wd = await Withdrawal.findById(withdrawalId);
-    if (!wd) return res.status(404).json({ error: 'NOT_FOUND' });
-    if (wd.status !== 'pending') return res.status(400).json({ error: 'ALREADY_PROCESSED' });
-    wd.status = 'rejected';
-    await wd.save();
-    // Refund balance
-    await User.findOneAndUpdate(
-      { telegramId: wd.telegramId },
-      { $inc: { balance: wd.amount } }
+    if (!withdrawalId) return res.status(400).json({ error: 'INVALID' });
+
+    // ATOMIC: only reject if still pending — prevents double-refund on rapid clicks
+    const wd = await Withdrawal.findOneAndUpdate(
+      { _id: withdrawalId, status: 'pending' },
+      { $set: { status: 'rejected' } },
+      { new: true }
     );
-    await logAdmin('REJECT_WITHDRAWAL', wd.telegramId, { withdrawalId, amount: wd.amount }, req);
+
+    if (!wd) {
+      // Either not found OR already processed
+      const exists = await Withdrawal.findById(withdrawalId);
+      if (!exists) return res.status(404).json({ error: 'NOT_FOUND' });
+      return res.status(400).json({ error: 'ALREADY_PROCESSED', currentStatus: exists.status });
+    }
+
+    // Refund balance — ATOMIC
     try {
-      await bot.sendMessage(wd.telegramId, `❌ Withdrawal rejected. ${wd.amount} TON refunded to your balance.`);
-    } catch(e) {}
+      await User.findOneAndUpdate(
+        { telegramId: wd.telegramId },
+        { $inc: { balance: wd.amount } }
+      );
+    } catch(refundErr) {
+      // Critical: rollback the rejection if refund fails
+      console.error('[REJECT] ❌ Refund failed, rolling back rejection:', refundErr.message);
+      await Withdrawal.findOneAndUpdate(
+        { _id: withdrawalId, status: 'rejected' },
+        { $set: { status: 'pending' } }
+      );
+      return res.status(500).json({ error: 'REFUND_FAILED' });
+    }
+
+    await logAdmin('REJECT_WITHDRAWAL', wd.telegramId, { withdrawalId, amount: wd.amount }, req);
+
+    try {
+      await bot.sendMessage(wd.telegramId,
+        `❌ Withdrawal rejected.\n💰 ${wd.amount} TON refunded to your balance.`
+      );
+    } catch(e) { console.log('[REJECT] User notify failed:', e.message); }
+
+    console.log(`[REJECT] ✅ Refunded ${wd.amount} TON to ${wd.telegramId}`);
     res.json({ success: true });
   } catch (error) {
+    console.error('[REJECT]', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -2913,6 +3156,34 @@ app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISO
 setInterval(verifyDeposits, 2 * 60 * 1000);
 setInterval(expireMiners, 10 * 60 * 1000);
 setInterval(() => fetch(process.env.WEBHOOK_URL + '/health').catch(() => {}), 5 * 60 * 1000);
+
+// ============ GLOBAL ERROR HANDLERS (PREVENT CRASHES) ============
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL] Uncaught Exception:', err);
+  // Don't exit - keep the bot running
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[FATAL] Unhandled Promise Rejection:', reason);
+});
+
+bot.on('error', (err) => {
+  console.error('[BOT] Error:', err.message);
+});
+
+bot.on('polling_error', (err) => {
+  console.error('[BOT] Polling error:', err.message);
+});
+
+bot.on('webhook_error', (err) => {
+  console.error('[BOT] Webhook error:', err.message);
+});
+
+// Express error handler
+app.use((err, req, res, next) => {
+  console.error('[EXPRESS] Error:', err.message);
+  res.status(500).json({ error: 'INTERNAL_ERROR' });
+});
 
 // ============ START ============
 const PORT = process.env.PORT || 3000;

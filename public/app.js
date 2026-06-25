@@ -7,6 +7,7 @@ let pendingInterval = null;
 let tonConnectUI = null;
 let currentBuyMiner = null;
 let currentBuyMemo = null;
+let currentBuyAmount = null;
 
 // ============ PROFESSIONAL SVG ICONS LIBRARY ============
 // All icons use same stroke-width:2, viewBox:0 0 24 24, currentColor
@@ -360,6 +361,7 @@ async function buyMiner(minerId) {
     if (d.success && d.type==='deposit_required') {
       currentBuyMiner = miner;
       currentBuyMemo = d.memo;
+      currentBuyAmount = d.amount;  // Discounted amount from backend
       showBuyModal(miner, d.memo);
       return;
     }
@@ -453,8 +455,8 @@ function showBuyModal(miner, memo) {
 
 // ============ OPTION 1: TON Connect ============
 async function payOption1() {
-  if (!currentBuyMiner || !currentBuyMemo) return;
-  const amount = currentBuyMiner.price;
+  if (!currentBuyMiner || !currentBuyMemo || !currentBuyAmount) return;
+  const amount = currentBuyAmount;  // Use discounted amount, NOT miner.price
   const memo = currentBuyMemo;
 
   if (!tonConnectUI) { toast('⚠ Wallet not available'); return; }
@@ -580,13 +582,13 @@ async function payOption2() {
 
 // ============ OPTION 3: Manual Deposit Page ============
 function payOption3() {
-  if (!currentBuyMiner || !currentBuyMemo) return;
+  if (!currentBuyMiner || !currentBuyMemo || !currentBuyAmount) return;
   document.getElementById('buy-modal').style.display='none';
 
-  document.getElementById('manual-amt-val').textContent = currentBuyMiner.price+' TON';
+  document.getElementById('manual-amt-val').textContent = currentBuyAmount+' TON';
   document.getElementById('manual-addr-val').textContent = BOT_WALLET;
   document.getElementById('manual-memo-val').textContent = currentBuyMemo;
-  document.getElementById('manual-warn-amt').textContent = currentBuyMiner.price;
+  document.getElementById('manual-warn-amt').textContent = currentBuyAmount;
 
   goPage('manual', null);
 }
