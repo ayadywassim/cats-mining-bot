@@ -101,12 +101,9 @@ const MINERS_CONFIG = [
 ];
 
 // Referral milestone rewards (free miner at X valid referrals)
-const MILESTONES = [
-  { id: 'ref_15',  refs: 15,  minerId: 'miner_1', name: 'Whiskers' },
-  { id: 'ref_30',  refs: 30,  minerId: 'miner_2', name: 'Mittens'  },
-  { id: 'ref_50',  refs: 50,  minerId: 'miner_3', name: 'Shadow'   },
-  { id: 'ref_100', refs: 100, minerId: 'miner_5', name: 'Tiger'    },
-];
+// MILESTONES DISABLED — referrals only earn commission from actual deposits
+// Free miners for refs encourage fake account farming - removed
+const MILESTONES = [];
 
 // ============ MONGODB ============
 mongoose.connect(process.env.MONGO_URI).then(() => console.log('✅ MongoDB connected')).catch(e => console.error('❌ MongoDB:', e.message));
@@ -140,13 +137,17 @@ const userSchema = new mongoose.Schema({
 const User = mongoose.model('CatsMiningUser', userSchema);
 
 // Referral audit log
+// One log per (referrer, referred) — tracks validation status + total commissions
 const referralLogSchema = new mongoose.Schema({
   referrerId: String,
   referredId: String,
   status: { type: String, enum: ['valid', 'paid', 'rejected'], default: 'valid' },
   reason: String,
-  commission: { type: Number, default: 0 },
-  depositAmount: Number,
+  commission: { type: Number, default: 0 },         // Total commission paid to date
+  depositAmount: Number,                             // Last deposit that triggered commission
+  depositsCount: { type: Number, default: 0 },       // How many deposits paid commission
+  lastDepositId: String,                             // Last deposit ID processed
+  paidDepositIds: { type: [String], default: [] },   // All deposit IDs that paid commission
   createdAt: { type: Date, default: Date.now },
   verifiedAt: Date
 });
@@ -772,27 +773,53 @@ app.post('/api/miners/buy-balance', criticalLimiter, async (req, res) => {
 
     console.log(`[MINER] ${tgId} bought ${minerConfig.name} with balance (${finalPrice} TON, discount=${discount}%)`);
 
-    // Referral commission — only if not paid yet (prevent duplicate)
+    // Referral commission — pay per deposit using depositId tracking
     if (updated.referredBy) {
-      const existingLog = await ReferralLog.findOne({
+      const refLog = await ReferralLog.findOne({
         referrerId: updated.referredBy,
-        referredId: tgId,
-        status: 'paid'
+        referredId: tgId
       });
-      if (!existingLog) {
-        const commission = finalPrice * 0.10;   // 10% of ACTUAL paid amount
+      const depositIdStr = deposit._id.toString();
+      const alreadyPaid = refLog && refLog.paidDepositIds && refLog.paidDepositIds.includes(depositIdStr);
+
+      if (!alreadyPaid) {
+        const commission = finalPrice * 0.10;
         await User.findOneAndUpdate(
           { telegramId: updated.referredBy },
           { $inc: { balance: commission, refCommission: commission, totalEarned: commission } }
         );
         await ReferralLog.findOneAndUpdate(
           { referrerId: updated.referredBy, referredId: tgId },
-          { status: 'paid', commission, depositAmount: finalPrice, verifiedAt: new Date() },
+          {
+            $set: {
+              status: 'paid',
+              depositAmount: finalPrice,
+              lastDepositId: depositIdStr,
+              verifiedAt: new Date()
+            },
+            $inc: { commission, depositsCount: 1 },
+            $addToSet: { paidDepositIds: depositIdStr },
+            $setOnInsert: {
+              referrerId: updated.referredBy,
+              referredId: tgId,
+              createdAt: new Date()
+            }
+          },
           { upsert: true }
         );
-        console.log(`[REFERRAL] +${commission} TON to ${updated.referredBy} (balance buy)`);
+        console.log(`[REFERRAL] +${commission} TON to ${updated.referredBy} (balance buy, deposit=${depositIdStr})`);
+
+        // Notify referrer
+        try {
+          await bot.sendMessage(updated.referredBy,
+            `💎 *Referral Commission!*\n\n` +
+            `Your referral just purchased a miner\n` +
+            `You earned *${commission.toFixed(4)} TON* (10%)`,
+            { parse_mode: 'Markdown' }
+          );
+        } catch(e) {}
       } else {
-        console.log(`[REFERRAL] ⏭️ Already paid for ${tgId} → ${updated.referredBy}`);
+        console.log(`[REFERRAL] ⏭️ Already paid for deposit ${depositIdStr}`);
       }
     }
 
@@ -1976,39 +2003,61 @@ async function verifyDeposits() {
         // ═══════════════════════════════════════════════════
         const user = await User.findOne({ telegramId: locked.telegramId });
         if (user && user.referredBy) {
-          // Check if this specific deposit already paid commission
-          const alreadyPaid = await ReferralLog.findOne({
+          // Get/create referral log
+          let refLog = await ReferralLog.findOne({
             referrerId: user.referredBy,
-            referredId: locked.telegramId,
-            status: 'paid'
+            referredId: locked.telegramId
           });
 
-          if (!alreadyPaid) {
+          const depositIdStr = locked._id.toString();
+          const alreadyPaidThisDeposit = refLog && refLog.paidDepositIds && refLog.paidDepositIds.includes(depositIdStr);
+
+          if (!alreadyPaidThisDeposit) {
             const commission = locked.amount * 0.10;
+
+            // Pay referrer
             await User.findOneAndUpdate(
               { telegramId: user.referredBy },
               { $inc: { balance: commission, refCommission: commission, totalEarned: commission } }
             );
 
+            // Atomic update: add depositId + increment counters
             await ReferralLog.findOneAndUpdate(
               { referrerId: user.referredBy, referredId: locked.telegramId },
               {
                 $set: {
                   status: 'paid',
-                  commission,
                   depositAmount: locked.amount,
+                  lastDepositId: depositIdStr,
                   verifiedAt: new Date()
+                },
+                $inc: {
+                  commission: commission,
+                  depositsCount: 1
+                },
+                $addToSet: { paidDepositIds: depositIdStr },
+                $setOnInsert: {
+                  referrerId: user.referredBy,
+                  referredId: locked.telegramId,
+                  createdAt: new Date()
                 }
               },
-              { upsert: true }
+              { upsert: true, new: true }
             );
 
-            console.log(`[REFERRAL] ✅ +${commission.toFixed(4)} TON to ${user.referredBy}`);
+            console.log(`[REFERRAL] ✅ +${commission.toFixed(4)} TON to ${user.referredBy} (deposit=${depositIdStr})`);
 
-            // Check milestones
-            try { await checkMilestones(user.referredBy); } catch(e) {}
+            // Notify referrer
+            try {
+              await bot.sendMessage(user.referredBy,
+                `💎 *Referral Commission!*\n\n` +
+                `Your referral just deposited *${locked.amount} TON*\n` +
+                `You earned *${commission.toFixed(4)} TON* (10%)`,
+                { parse_mode: 'Markdown' }
+              );
+            } catch(e) {}
           } else {
-            console.log(`[REFERRAL] ⏭️ Commission already paid`);
+            console.log(`[REFERRAL] ⏭️ Already paid commission for deposit ${depositIdStr}`);
           }
         }
 
