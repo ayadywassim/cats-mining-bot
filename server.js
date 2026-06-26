@@ -721,6 +721,8 @@ app.post('/api/miners/buy-balance', criticalLimiter, async (req, res) => {
     const finalPrice = applyDiscount(minerConfig.price, discount);
 
     // Atomic: deduct balance only if sufficient
+    // Note: NOT incrementing totalDeposited here since user already deposited
+    // when they earned that balance. totalInvested tracks money spent on miners.
     const updated = await User.findOneAndUpdate(
       { telegramId: tgId, balance: { $gte: finalPrice }, banned: false },
       { $inc: { balance: -finalPrice, totalInvested: finalPrice } },
