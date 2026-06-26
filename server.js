@@ -930,21 +930,24 @@ app.get('/api/miners/pending/:telegramId', async (req, res) => {
     const now = new Date();
 
     for (const miner of miners) {
+      // Skip expired miners
       if (now >= miner.expiresAt) continue;
-      
-      // Check if still in 24h warmup
+
+      // ALWAYS count toward dailyProfit + activeCount (includes warmup miners)
+      dailyProfit += miner.daily;
+      activeCount++;
+
+      // Skip pending accumulation if still in 24h warmup
       if (miner.startsEarningAt && now < miner.startsEarningAt) {
-        activeCount++;
         continue;
       }
 
+      // Accumulate pending earnings (only for miners that started earning)
       const earnStart = miner.startsEarningAt || miner.startedAt;
       const lastCollect = miner.lastCollected || earnStart;
       const effectiveStart = lastCollect < earnStart ? earnStart : lastCollect;
       const hoursSince = (now - effectiveStart) / (1000 * 60 * 60);
       totalPending += (miner.daily / 24) * hoursSince;
-      dailyProfit += miner.daily;
-      activeCount++;
     }
 
     res.json({ success: true, pending: totalPending, dailyProfit, activeCount });
