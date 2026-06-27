@@ -737,8 +737,9 @@ async function submitPartnerRequest() {
   const link = document.getElementById('partner-link').value.trim();
   const desc = document.getElementById('partner-desc').value.trim();
 
-  if (!link.match(/^https?:\/\/(t\.me|telegram\.me)\/[a-zA-Z0-9_+]+$/)) {
-    toast('⚠ Invalid channel link. Use https://t.me/yourchannel');
+  // Accept ANY link — basic length validation only
+  if (!link || link.length < 3 || link.length > 500) {
+    toast('⚠ Link must be 3-500 characters');
     return;
   }
 
@@ -977,12 +978,12 @@ async function doTask(taskId, link, reward) {
     return;
   }
 
-  // One-time task with link: 15s countdown
+  // One-time task with link: 5s countdown
   if (link && link!=='null' && link!=='#' && link!=='') {
     const btn = document.querySelector('[onclick*="\''+taskId+'\'"]');
     if (btn) {
       btn.disabled = true;
-      let sec = 15;
+      let sec = 5;
       btn.className = 'task-btn done';
       btn.innerHTML = ic('clock',12)+' '+sec+'s';
       const timer = setInterval(() => {
