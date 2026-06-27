@@ -164,17 +164,43 @@ async function refreshUser() {
 }
 
 // ============ PENDING ============
+let localPendingValue = 0;
+let localDailyProfit = 0;
+let localLastSync = Date.now();
+let smoothTickInterval = null;
+
 function startPendingCounter() {
   if (pendingInterval) clearInterval(pendingInterval);
+  if (smoothTickInterval) clearInterval(smoothTickInterval);
+
   updatePending();
-  // Slower interval (5s instead of 3s) reduces server load
+
+  // Sync with server every 10s (reduces server load)
   pendingInterval = setInterval(() => {
-    // Skip updates when document is hidden (saves battery + API calls)
     if (document.hidden) return;
     updatePending();
-  }, 5000);
-  // Poll event every 60s (in case admin starts/ends one)
+  }, 10000);
+
+  // SMOOTH local tick every 1 second (user feels mining is "alive")
+  smoothTickInterval = setInterval(() => {
+    if (document.hidden) return;
+    smoothTick();
+  }, 1000);
+
+  // Poll event every 60s
   setInterval(() => { if (!document.hidden) loadActiveEvent(); }, 60000);
+}
+
+// Local tick: increments pending value per second between API calls
+function smoothTick() {
+  if (!localDailyProfit || localDailyProfit <= 0) return;
+
+  const secElapsed = (Date.now() - localLastSync) / 1000;
+  const earnedSinceSync = (localDailyProfit / 86400) * secElapsed;
+  const currentPending = localPendingValue + earnedSinceSync;
+
+  const pndEl = document.getElementById('pending-value');
+  if (pndEl) pndEl.innerHTML = currentPending.toFixed(6)+' <span class="pnd-ton">TON</span>';
 }
 
 async function updatePending() {
@@ -183,11 +209,16 @@ async function updatePending() {
     const r = await fetch(API+'/api/miners/pending/'+userData.telegramId);
     const d = await r.json();
     if (d.success) {
+      // Update local sync values
+      localPendingValue = d.pending;
+      localDailyProfit = d.dailyProfit;
+      localLastSync = Date.now();
+
       const pndEl = document.getElementById('pending-value');
       const profEl = document.getElementById('stat-profit');
       const minEl = document.getElementById('stat-miners');
       const hdrMin = document.getElementById('hdr-miners');
-      if (pndEl) pndEl.innerHTML = d.pending.toFixed(4)+' <span class="pnd-ton">TON</span>';
+      if (pndEl) pndEl.innerHTML = d.pending.toFixed(6)+' <span class="pnd-ton">TON</span>';
       if (profEl) profEl.textContent = d.dailyProfit.toFixed(3);
       if (minEl) minEl.textContent = d.activeCount;
       if (hdrMin) hdrMin.textContent = d.activeCount;

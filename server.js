@@ -925,35 +925,59 @@ app.post('/api/miners/collect', strictLimiter, async (req, res) => {
 // ============ API: PENDING EARNINGS ============
 app.get('/api/miners/pending/:telegramId', async (req, res) => {
   try {
-    const miners = await ActiveMiner.find({ telegramId: req.params.telegramId, status: 'active' });
+    const tgId = req.params.telegramId;
+    const miners = await ActiveMiner.find({ telegramId: tgId, status: 'active' });
     let totalPending = 0;
     let dailyProfit = 0;
     let activeCount = 0;
+    let warmupCount = 0;
     const now = new Date();
 
     for (const miner of miners) {
-      // Skip expired miners
-      if (now >= miner.expiresAt) continue;
+      // Skip expired
+      if (miner.expiresAt && now >= miner.expiresAt) continue;
 
-      // ALWAYS count toward dailyProfit + activeCount (includes warmup miners)
-      dailyProfit += miner.daily;
       activeCount++;
+      dailyProfit += (miner.daily || 0);
 
-      // Skip pending accumulation if still in 24h warmup
-      if (miner.startsEarningAt && now < miner.startsEarningAt) {
+      // Determine effective start time for THIS miner's earnings
+      // earnStart = when this miner started earning (or should start)
+      const earnStart = miner.startsEarningAt || miner.startedAt || miner.createdAt;
+
+      // If still in warmup → no pending yet, but still counts toward dailyProfit
+      if (earnStart && now < earnStart) {
+        warmupCount++;
         continue;
       }
 
-      // Accumulate pending earnings (only for miners that started earning)
-      const earnStart = miner.startsEarningAt || miner.startedAt;
-      const lastCollect = miner.lastCollected || earnStart;
-      const effectiveStart = lastCollect < earnStart ? earnStart : lastCollect;
-      const hoursSince = (now - effectiveStart) / (1000 * 60 * 60);
-      totalPending += (miner.daily / 24) * hoursSince;
+      // Calculate earnings since last collect (or since earnStart)
+      const lastCollect = miner.lastCollected;
+      let effectiveStart;
+      if (lastCollect && lastCollect > earnStart) {
+        effectiveStart = lastCollect;
+      } else {
+        effectiveStart = earnStart;
+      }
+
+      const msSince = now - new Date(effectiveStart);
+      if (msSince <= 0) continue;
+
+      // Pending = (daily rate) × (time elapsed in days)
+      // Equivalent to: (daily / 86400 seconds) × seconds elapsed
+      const daysSince = msSince / (1000 * 60 * 60 * 24);
+      const earned = (miner.daily || 0) * daysSince;
+      totalPending += earned;
     }
 
-    res.json({ success: true, pending: totalPending, dailyProfit, activeCount });
+    res.json({
+      success: true,
+      pending: totalPending,
+      dailyProfit,
+      activeCount,
+      warmupCount   // helps debug: how many miners are in warmup
+    });
   } catch (error) {
+    console.error('[PENDING]', error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -3741,6 +3765,33 @@ app.post('/api/admin/validate-pending-refs', adminAuth, async (req, res) => {
 // Wallet reset — when migrating to new BOT_WALLET
 // Clears all pending deposits + processed TX history
 // USE WITH CAUTION: only after changing BOT_WALLET env var
+// Force-start mining for ALL miners in warmup (one-time fix after removing warmup)
+app.post('/api/admin/force-start-all-miners', adminAuth, async (req, res) => {
+  try {
+    const { confirm } = req.body;
+    if (confirm !== 'YES_START_ALL') {
+      return res.status(400).json({ error: 'CONFIRMATION_REQUIRED', message: 'Send {"confirm":"YES_START_ALL"}' });
+    }
+
+    const now = new Date();
+    const result = await ActiveMiner.updateMany(
+      { status: 'active', startsEarningAt: { $gt: now } },
+      { $set: { startsEarningAt: now } }
+    );
+
+    await logAdmin('FORCE_START_ALL_MINERS', 'system', { updated: result.modifiedCount }, req);
+    console.log(`[ADMIN] Force-started ${result.modifiedCount} miners`);
+
+    res.json({
+      success: true,
+      updated: result.modifiedCount,
+      message: `${result.modifiedCount} miners now start earning immediately`
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/api/admin/wallet-reset', adminAuth, async (req, res) => {
   try {
     const { confirm } = req.body;
