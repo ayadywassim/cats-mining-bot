@@ -1,4 +1,4 @@
-const API = 'https://cats-mining-backend.onrender.com';
+const API = 'https://cats-mining-backend-822p.onrender.com';
 const BOT_WALLET = 'UQBl_vId6Bx45nhqVFa2OLuA1upxZxNXvTkH8zLEo_jbkrd1';
 const BOT_USERNAME = 'MiningCatsBot';
 const tg = window.Telegram && window.Telegram.WebApp;
