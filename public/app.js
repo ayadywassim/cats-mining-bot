@@ -1120,7 +1120,7 @@ function openWithdraw() {
     <div class="modal-row"><div class="modal-label">${T('balance')}: <span style="color:var(--amber-l)">${(userData?userData.balance:0).toFixed(2)} TON</span></div></div>
     <div class="modal-row"><div class="modal-label">${T('amount')}</div><input class="modal-input" type="number" id="w-amount" placeholder="0.5" min="0.5" step="0.1"></div>
     <div class="modal-row"><div class="modal-label">${T('walletAddress')}</div><input class="modal-input" type="text" id="w-wallet" placeholder="UQ..."></div>
-    <div class="modal-fee">${T('fee')}: 5% · Min: 1 TON</div>
+    <div class="modal-fee">${T('fee')}: 5% · Min: 0.5 TON</div>
     <div id="w-preview" style="font-size:12px;color:var(--dm);margin-bottom:12px"></div>
     <button class="modal-btn" onclick="submitWithdraw()">${T('submit')}</button>`;
   document.getElementById('w-amount').addEventListener('input',function(){const a=parseFloat(this.value)||0;const fee=a*0.05;document.getElementById('w-preview').textContent=a>0?T('youReceive')+': '+(a-fee).toFixed(4)+' TON ('+T('fee')+': '+fee.toFixed(4)+')':'';});
