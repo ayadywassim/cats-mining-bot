@@ -54,7 +54,7 @@ function ic(name, size) {
 // ============ TON CONNECT ============
 try {
   tonConnectUI = new TON_CONNECT_UI.TonConnectUI({
-    manifestUrl: 'https://cats-mining.vercel.app/tonconnect-manifest.json',
+    manifestUrl: 'https://cats-mining-sigma.vercel.app/tonconnect-manifest.json',
     buttonRootId: null
   });
   tonConnectUI.onStatusChange(w => updateWalletUI(w));
