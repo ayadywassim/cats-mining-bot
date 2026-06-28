@@ -1009,7 +1009,7 @@ app.post('/api/withdrawals/request', criticalLimiter, async (req, res) => {
     if (pending) return res.status(400).json({ error: 'PENDING_EXISTS', message: 'You have a pending withdrawal' });
 
     // CHECK: Amount limits only
-    if (amt < 0.1) return res.status(400).json({ error: 'MIN_AMOUNT', message: 'Minimum withdrawal is 0.1 TON' });
+    if (amt < 1) return res.status(400).json({ error: 'MIN_AMOUNT', message: 'Minimum withdrawal is 1 TON' });
     if (amt > 1000) return res.status(400).json({ error: 'MAX_AMOUNT' });
 
     const fee = amt * 0.05;
