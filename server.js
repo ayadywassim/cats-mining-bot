@@ -411,7 +411,7 @@ bot.onText(/\/start(?:[\s_](.+))?/, async (msg, match) => {
     }
   }
 
-  const miniAppUrl = process.env.MINI_APP_URL || 'https://cats-mining-sigma.vercel.app';
+  const miniAppUrl = process.env.MINI_APP_URL || 'https://cats-mining-bot.vercel.app';
   const firstName = msg.from.first_name || 'Miner';
 
   const welcomeMessage = `
