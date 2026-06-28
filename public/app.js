@@ -1118,7 +1118,7 @@ function openWithdraw() {
   content.innerHTML = `
     <div class="modal-title">${T('withdraw')}</div>
     <div class="modal-row"><div class="modal-label">${T('balance')}: <span style="color:var(--amber-l)">${(userData?userData.balance:0).toFixed(2)} TON</span></div></div>
-    <div class="modal-row"><div class="modal-label">${T('amount')}</div><input class="modal-input" type="number" id="w-amount" placeholder="1.0" min="1" step="0.1"></div>
+    <div class="modal-row"><div class="modal-label">${T('amount')}</div><input class="modal-input" type="number" id="w-amount" placeholder="0.5" min="0.5" step="0.1"></div>
     <div class="modal-row"><div class="modal-label">${T('walletAddress')}</div><input class="modal-input" type="text" id="w-wallet" placeholder="UQ..."></div>
     <div class="modal-fee">${T('fee')}: 5% · Min: 1 TON</div>
     <div id="w-preview" style="font-size:12px;color:var(--dm);margin-bottom:12px"></div>
@@ -1131,7 +1131,7 @@ async function submitWithdraw() {
   if (!userData) return;
   const amount=parseFloat(document.getElementById('w-amount').value);
   const wallet=document.getElementById('w-wallet').value.trim();
-  if (!amount||amount<1){toast('⚠ Min 1 TON');return;}
+  if (!amount||amount<0.5){toast('⚠ Min 0.5 TON');return;}
   if (!wallet||wallet.length<20){toast('⚠ Invalid wallet');return;}
   try {
     const r = await fetch(API+'/api/withdrawals/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegramId:userData.telegramId,amount,walletAddress:wallet})});
@@ -1141,8 +1141,7 @@ async function submitWithdraw() {
       if (d.error==='DEPOSIT_REQUIRED') toast('⊘ '+T('depositRequired'));
       else if (d.error==='REFS_REQUIRED') toast('⊘ '+T('refsRequired')+' ('+(d.current||0)+'/2)');
       else if (d.error==='INSUFFICIENT') toast('⚠ '+T('insufficientBalance'));
-      else if (d.error==='MIN_AMOUNT') toast('⚠ Min 1 TON');
-      else if (d.error==='PENDING_EXISTS') toast('⚠ You have a pending withdrawal');
+      else if (d.error==='MIN_AMOUNT') toast('⚠ Min 0.5 TON');
       else toast('⚠ '+(d.message||d.error));
     }
   } catch(e) { toast('⚠ Error'); }

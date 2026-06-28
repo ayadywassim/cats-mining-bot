@@ -1004,12 +1004,11 @@ app.post('/api/withdrawals/request', criticalLimiter, async (req, res) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
     if (user.banned) return res.status(403).json({ error: 'ACCOUNT_BANNED' });
 
-    // Prevent double withdrawal (check pending requests)
-    const pending = await Withdrawal.findOne({ telegramId: tgId, status: 'pending' });
-    if (pending) return res.status(400).json({ error: 'PENDING_EXISTS', message: 'You have a pending withdrawal' });
+    // Multiple pending withdrawals allowed — users can submit as many as they want
+    // (balance check below ensures they can't withdraw more than they have)
 
     // CHECK: Amount limits only
-    if (amt < 1) return res.status(400).json({ error: 'MIN_AMOUNT', message: 'Minimum withdrawal is 1 TON' });
+    if (amt < 0.5) return res.status(400).json({ error: 'MIN_AMOUNT', message: 'Minimum withdrawal is 0.5 TON' });
     if (amt > 1000) return res.status(400).json({ error: 'MAX_AMOUNT' });
 
     const fee = amt * 0.05;
