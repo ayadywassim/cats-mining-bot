@@ -1008,7 +1008,7 @@ app.post('/api/withdrawals/request', criticalLimiter, async (req, res) => {
     // (balance check below ensures they can't withdraw more than they have)
 
     // CHECK: Amount limits only
-    if (amt < 0.5) return res.status(400).json({ error: 'MIN_AMOUNT', message: 'Minimum withdrawal is 0.5 TON' });
+    if (amt < 2) return res.status(400).json({ error: 'MIN_AMOUNT', message: 'Minimum withdrawal is 2 TON' });
     if (amt > 1000) return res.status(400).json({ error: 'MAX_AMOUNT' });
 
     const fee = amt * 0.05;
